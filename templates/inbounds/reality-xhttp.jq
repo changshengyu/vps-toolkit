@@ -45,5 +45,7 @@
       }
     }
   },
-  sniffing: $sniffing
+  sniffing: $sniffing,
+  shareAddrStrategy: "custom",
+  shareAddr: $hy2_domain
 }

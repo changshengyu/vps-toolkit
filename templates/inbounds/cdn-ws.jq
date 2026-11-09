@@ -45,5 +45,7 @@
       settings: {fingerprint: "chrome", echConfigList: ""}
     }
   },
-  sniffing: $sniffing
+  sniffing: $sniffing,
+  shareAddrStrategy: "custom",
+  shareAddr: $cdn_domain
 }

@@ -11,35 +11,74 @@
 
 4 个入站共用一个客户端和订阅 ID。
 
-> **当前进度：第一阶段**，只支持 `--dry-run` 预览，不改动系统。安装面板、申请证书、配置防火墙、写入面板将在第二阶段加入。
-
 ## 快速开始
 
-在 VPS 上以 root 运行，一条命令即可：
+在 VPS 上以 root 运行。建议先预览，确认无误后再正式部署：
 
 ```bash
+# 预览：只生成配置，不改动系统
 bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) deploy --dry-run
+
+# 正式部署
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) deploy
 ```
 
 也可以用管道方式，参数写在 `--` 后面：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh | bash -s -- deploy --dry-run
+curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh | bash -s -- deploy
 ```
 
-两种方式都会下载完整仓库到临时目录运行，结束后自动清理；交互输入会从终端读取。预览文件输出在当前目录的 `deploy-preview/` 下。
+两种方式都会下载完整仓库到临时目录运行，结束后自动清理；交互输入会从终端读取。
 
-已经克隆仓库时：
+已经克隆仓库时：`bash vps.sh deploy`。
+
+直接运行时，脚本会逐项询问必填参数，其余参数使用默认值或自动生成，最后显示汇总和部署计划，确认后执行。
+
+## 部署流程
+
+| 步骤 | 内容 |
+|---|---|
+| 检查环境 | 端口是否被其他程序占用；hy2 域名是否解析到本机（只提醒） |
+| 防火墙 | 检测已启用的 ufw / firewalld / iptables，先放行 SSH 端口，再放行面板和节点端口；没有启用防火墙时跳过，不会主动开启 |
+| 安装 3x-ui | 未安装时用官方脚本无人值守安装；已安装则沿用现有面板的端口、路径和账号 |
+| 生成密钥 | 连同参数保存到 `/root/.vps-toolkit/state.env` |
+| 申请证书 | hy2 域名：HTTP 验证（或 `HY2_CERT_MODE=dns`），并设为面板证书；CDN 域名：CF Token DNS 验证，同时申请 `*.域名`；证书仍有效时跳过 |
+| 导入入站 | 通过面板 API 导入；同端口已有入站时询问是否覆盖 |
+| 更新模板 | 备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`，替换出站和路由规则，其他字段不变，然后重启 Xray 并检查状态 |
+| 端口跳跃 | 调用 `hy2-port-hopping.sh` |
+| 输出结果 | 面板地址、账号和分享链接，保存到 `/root/vps-deploy-result.txt`（权限 600） |
+
+脚本通过 `x-ui setting -getApiToken -tokenName vps-toolkit` 获取专用 API Token，每次运行会轮换这个 Token，不影响你在面板中创建的其他 Token。
+
+### 常用选项
+
+| 选项 | 作用 |
+|---|---|
+| `-y` | 跳过确认（非交互运行时必须加） |
+| `--replace` / `--no-replace` | 同端口已有入站时直接覆盖 / 直接跳过（默认询问，非交互时跳过） |
+| `--skip-firewall` | 不修改系统防火墙 |
+| `--skip-hop` | 不配置端口跳跃 |
+| `--regen` | 重新生成全部密钥（已导入客户端的节点会失效） |
+
+### 重新运行
+
+参数和密钥都保存在 `/root/.vps-toolkit/state.env`，重跑时不用再输入，生成的密钥也保持不变。比如只想重新导入入站：
 
 ```bash
-bash vps.sh deploy --dry-run
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) deploy --replace
 ```
 
-直接运行时，脚本会逐项询问必填参数，其余参数使用默认值或自动生成，最后显示汇总。
+重装系统后 `state.env` 会丢失。想让节点保持不变，重装前把它备份出来，重装后放回 `/root/.vps-toolkit/` 再运行。
+
+### 部署后
+
+- 云厂商安全组需要手动放行：TCP 面板端口、443、30115、8443（HTTP 验证时还有 80，续期也要用）；UDP 443、20000-20100
+- Cloudflare 中 CDN 域名开启小黄云，SSL/TLS 模式选"完全（严格）"；hy2 域名保持灰云
 
 ## 提供参数的方式
 
-读取优先级：**命令行 > 环境变量 > 配置文件 > 上次生成 > 交互输入 / 默认值**。
+读取优先级：**命令行 > 环境变量 > 配置文件 > 上次部署 > 交互输入 / 默认值**。
 
 可以混用，例如把固定不变的参数写进配置文件，每台机器不同的参数在命令行里传入。
 
@@ -108,7 +147,7 @@ UUID、订阅 ID、两套 Reality 密钥对和 shortIds、VLESS Encryption 密�
 
 - 优先使用面板自带的 xray 生成（`/usr/local/x-ui/bin/xray-linux-*`），也可以用 `XRAY_BIN` 指定
 - 没有 xray 时，预览用 openssl 生成 Reality 密钥，VLESS Encryption 用占位符代替
-- 正式部署时保存到 `/root/.vps-toolkit/state.env`（权限 600），重跑时复用，已导入客户端的节点不会失效；用 `--regen` 可全部重新生成
+- 正式部署时连同参数保存到 `/root/.vps-toolkit/state.env`（权限 600），重跑时复用，已导入客户端的节点不会失效；用 `--regen` 可全部重新生成
 
 ## 预览输出
 

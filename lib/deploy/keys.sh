@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # 一键部署：生成密钥并保存状态
-# 状态文件只保存脚本生成的值，重跑时复用，避免已导入客户端的节点失效。
+# 状态文件保存生成的密钥和本次参数，重跑时复用，避免已导入客户端的节点失效。
 
 # 需要持久化的生成值（包括 params.sh 中自动生成的参数）
 STATE_KEYS=(
@@ -9,10 +9,11 @@ STATE_KEYS=(
     REALITY_XHTTP_PRIV REALITY_XHTTP_PUB REALITY_XHTTP_SIDS
     VLESS_DEC VLESS_ENC
     PANEL_PORT PANEL_USER PANEL_PASS PANEL_PATH
-    CDN_WS_PATH XHTTP_PATH CLIENT_EMAIL
+    CDN_WS_PATH XHTTP_PATH CLIENT_EMAIL PANEL_INSTALLED_BY_US
 )
 
 XRAY_BIN="${XRAY_BIN:-}"
+PANEL_INSTALLED_BY_US="${PANEL_INSTALLED_BY_US:-0}"
 
 find_xray() {
     local f
@@ -135,7 +136,15 @@ save_state() {
     {
         printf '# vps-toolkit 一键部署生成的值，重跑时复用。删除本文件或使用 --regen 可重新生成。\n'
         printf '# 生成时间：%s\n' "$(date '+%F %T')"
+        # 生成的值和本次使用的全部参数，重跑时无需再次输入
+        local spec seen=" "
         for key in "${STATE_KEYS[@]}"; do
+            printf '%s=%s\n' "$key" "${!key}"
+            seen+="$key "
+        done
+        for spec in "${PARAM_SPECS[@]}"; do
+            key="$(spec_field "$spec" 1)"
+            case "$seen" in *" $key "*) continue ;; esac
             printf '%s=%s\n' "$key" "${!key}"
         done
     } >"$file.tmp"
