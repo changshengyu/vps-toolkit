@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 个人 VPS 工具集入口
-# 用法：bash vps.sh [deploy|hy2|3x-ui|tools|help] [操作]
+# 用法：bash vps.sh [deploy|hy2|3x-ui|routing|tools|help] [操作]
 
 set -euo pipefail
 
@@ -49,6 +49,7 @@ show_help() {
   hy2 install|status|uninstall
                              管理 Hysteria2 端口跳跃
   3x-ui install|status       安装 3x-ui 或查看状态
+  routing [策略]             修改 3x-ui 路由域策略（默认 IPIfNonMatch）
   tools [上游参数]           运行 VPS 多功能工具箱
   help                       显示帮助
 HELP
@@ -102,6 +103,7 @@ xui_menu() {
 3x-ui 面板
 1. 安装
 2. 查看状态
+3. 路由域策略改为 IPIfNonMatch
 0. 返回
 MENU
     read -r -p "请选择: " choice
@@ -109,6 +111,7 @@ MENU
     case "$choice" in
         1) bash "$ROOT_DIR/scripts/3x-ui.sh" install ;;
         2) bash "$ROOT_DIR/scripts/3x-ui.sh" status ;;
+        3) bash "$ROOT_DIR/scripts/xui-routing.sh" IPIfNonMatch ;;
         0) ;;
         *) warn "无效选择。" ;;
     esac
@@ -169,6 +172,7 @@ case "${1:-menu}" in
         ;;
     hy2) bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" "${2:-status}" ;;
     3x-ui) bash "$ROOT_DIR/scripts/3x-ui.sh" "${2:-status}" ;;
+    routing) bash "$ROOT_DIR/scripts/xui-routing.sh" "${2:-IPIfNonMatch}" ;;
     tools)
         shift
         bash "$ROOT_DIR/scripts/vps-tools.sh" "$@"

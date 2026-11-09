@@ -42,6 +42,7 @@ bash vps.sh hy2 status      # 查看状态
 bash vps.sh hy2 uninstall   # 卸载
 bash vps.sh 3x-ui install   # 安装 3x-ui
 bash vps.sh 3x-ui status    # 查看 3x-ui 状态
+bash vps.sh routing         # 已有 3x-ui 的路由域策略改为 IPIfNonMatch
 bash vps.sh tools           # 打开工具箱
 ```
 

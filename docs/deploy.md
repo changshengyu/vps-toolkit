@@ -173,3 +173,14 @@ UUID、订阅 ID、两套 Reality 密钥对和 shortIds、VLESS Encryption 密�
 未启用 AI 分流时，去掉第 2、3 条和 SS 出站。
 
 Xray 的一条规则里同时写 `domain` 和 `ip` 时，需要两者同时满足才会匹配，所以第 4、5 条分开写。
+
+### 旧机器修改路由域策略
+
+一键部署的机器已经是 `IPIfNonMatch`。之前手动配置的 3x-ui，可以只修改这一项，入站和路由规则保持不变：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) routing
+```
+
+修改前会备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`。在面板中对应「Xray 配置 → 基础配置 → 配置路由域策略」。
+
