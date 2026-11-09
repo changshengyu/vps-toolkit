@@ -106,7 +106,7 @@ check_dns() {
         return 0
     }
     PUBLIC_IP="$ip"
-    resolved="$(getent ahostsv4 "$HY2_DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')"
+    resolved="$(getent ahostsv4 "$HY2_DOMAIN" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
     case " $resolved " in
         *" $ip "*) info "域名解析正确：$HY2_DOMAIN -> $ip" ;;
         *) warn "$HY2_DOMAIN 解析到 [${resolved:-无记录}]，本机 IP 为 $ip。hy2、Reality 和面板都依赖这个域名，请确认解析（灰云）。" ;;

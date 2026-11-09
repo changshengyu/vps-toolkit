@@ -2,7 +2,9 @@
 # 一键部署 3x-ui 节点：Hysteria2、Reality+Vision、Reality+XHTTP、WS+TLS（CDN）
 # 用法：bash scripts/deploy.sh [选项] [--参数名 值 ...]
 
-set -euo pipefail
+set -Eeuo pipefail
+# 任何未处理的失败都显示出错位置，避免静默退出
+trap 'rc=$?; printf "错误：%s 第 %s 行命令失败（退出码 %s）：%s\n" "${BASH_SOURCE[0]##*/}" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/common.sh

@@ -65,7 +65,7 @@ set_panel_cert() {
     local cert key current
     cert="$(cert_dir "$HY2_DOMAIN")/fullchain.pem"
     key="$(cert_dir "$HY2_DOMAIN")/privkey.pem"
-    current="$("$XUI_BIN" setting -getCert true 2>/dev/null | awk -F': ' '/^cert:/ {print $2}' | tr -d '[:space:]')"
+    current="$("$XUI_BIN" setting -getCert true 2>/dev/null | awk -F': ' '/^cert:/ {print $2}' | tr -d '[:space:]' || true)"
 
     if [ "$current" = "$cert" ]; then
         info "面板证书已是 $HY2_DOMAIN，跳过。"
@@ -81,7 +81,7 @@ set_panel_cert() {
 
 panel_scheme() {
     local current
-    current="$("$XUI_BIN" setting -getCert true 2>/dev/null | awk -F': ' '/^cert:/ {print $2}' | tr -d '[:space:]')"
+    current="$("$XUI_BIN" setting -getCert true 2>/dev/null | awk -F': ' '/^cert:/ {print $2}' | tr -d '[:space:]' || true)"
     if [ -n "$current" ]; then printf 'https'; else printf 'http'; fi
 }
 

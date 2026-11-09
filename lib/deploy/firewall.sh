@@ -24,9 +24,9 @@ detect_ssh_ports() {
         ports="$(awk '{print $4}' <<<"$SSH_CONNECTION")"
     fi
     if command -v sshd >/dev/null 2>&1; then
-        ports="$ports $(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}')"
+        ports="$ports $(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}' || true)"
     fi
-    tr ' ' '\n' <<<"$ports" | grep -E '^[0-9]+$' | sort -un | tr '\n' ' '
+    tr ' ' '\n' <<<"$ports" | grep -E '^[0-9]+$' | sort -un | tr '\n' ' ' || true
 }
 
 # 用法：fw_allow tcp|udp 端口或 起始-结束 [说明]
@@ -96,7 +96,8 @@ setup_firewall() {
 port_owner() {
     local proto="$1" port="$2" flag="-tlnpH"
     [ "$proto" = "udp" ] && flag="-ulnpH"
-    ss $flag "sport = :$port" 2>/dev/null | grep -o 'users:(("[^"]*"' | sed 's/users:(("//' | sort -u | tr '\n' ' '
+    # 端口未被占用时 grep 无匹配，不能让 pipefail 中断脚本
+    ss $flag "sport = :$port" 2>/dev/null | grep -o 'users:(("[^"]*"' | sed 's/users:(("//; s/"$//' | sort -u | tr '\n' ' ' || true
 }
 
 # 端口被 x-ui / xray 以外的程序占用时报错
