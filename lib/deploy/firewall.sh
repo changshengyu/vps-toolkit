@@ -86,7 +86,7 @@ setup_firewall() {
     fw_allow tcp "$REALITY_PORT" "Reality"
     fw_allow tcp "$XHTTP_PORT" "XHTTP"
     fw_allow tcp "$CDN_PORT" "CDN"
-    [ "$HY2_CERT_MODE" = "http" ] && fw_allow tcp 80 "证书验证"
+    [ "$HY2_CERT_MODE" = "http" ] && fw_allow tcp 80 "证书申请与续期"
     fw_allow udp "$HY2_PORT" "hy2"
     fw_allow udp "$HOP_RANGE" "端口跳跃"
     fw_finish

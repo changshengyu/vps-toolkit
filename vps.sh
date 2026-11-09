@@ -58,7 +58,7 @@ show_help() {
 HELP
 }
 
-RESULT_FILE="/root/vps-deploy-result.txt"
+RESULT_FILE="${RESULT_FILE:-/root/vps-deploy-result.txt}"
 SHORTCUT="/usr/local/bin/vt"
 REPO_RAW_SCRIPT="https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh"
 
