@@ -24,6 +24,7 @@ ASK_ALL=0
 ASSUME_YES=0
 REGEN=0
 REPLACE=""
+CONFIG_ONLY=0
 SKIP_FIREWALL=0
 SKIP_HOP=0
 OUT_DIR=""
@@ -39,6 +40,7 @@ show_help() {
 
 选项：
   --dry-run            只生成配置并预览，不改动系统
+  --config-only        只更新已有 3x-ui 的出站、路由和 geodata，不动入站、证书和面板
   --out 目录           预览输出目录（默认 ./deploy-preview）
   -i, --ask-all        逐项询问全部参数（回车使用默认值）
   -c, --config 文件    配置文件（默认 $CONFIG_FILE）
@@ -69,6 +71,7 @@ parse_args() {
         arg="$1"
         case "$arg" in
             --dry-run) DRY_RUN=1 ;;
+            --config-only) CONFIG_ONLY=1 ;;
             --out) OUT_DIR="${2:?--out 需要目录}"; shift ;;
             --out=*) OUT_DIR="${arg#*=}" ;;
             -i | --ask-all) ASK_ALL=1 ;;
@@ -176,6 +179,46 @@ write_result() {
     umask "$prev_umask"
 }
 
+print_config_plan() {
+    cat <<PLAN
+
+==================== 更新计划（只更新配置） ====================
+将替换已有 3x-ui 的 Xray 模板中以下部分，入站、证书、面板设置不变：
+- 出站：direct、blocked$([ "$ENABLE_AI_ROUTE" = "y" ] && printf '、六六云 SS %s:%s' "$SS_ISP_ADDR" "$SS_ISP_PORT")（其他出站会被移除）
+- 路由：IPIfNonMatch；$([ "$ENABLE_AI_ROUTE" = "y" ] && printf 'AI 分流、')回国流量按 geoip:cn 屏蔽、BT 屏蔽（原有规则会被替换）
+- geodata 自动更新：$([ "$GEODATA_CRON" = "off" ] || [ -z "$GEODATA_CRON" ] && printf '关闭' || printf 'cron "%s"' "$GEODATA_CRON")
+修改前会备份当前模板到 $DEPLOY_HOME/backup/。
+================================================================
+PLAN
+}
+
+# --config-only：只更新已有面板的出站、路由和 geodata
+run_config_only() {
+    local backup
+
+    panel_installed || die "未安装 3x-ui，--config-only 只能用于已有面板。"
+    HY2_DOMAIN="$(panel_cert_domain)"
+
+    step "连接面板 API"
+    init_api
+    wait_panel_ready
+    info "面板就绪：$API_BASE"
+
+    PREVIEW_DIR="$(mktemp -d)"
+    mkdir -p "$PREVIEW_DIR/payload"
+    render_routing >"$PREVIEW_DIR/payload/xray-routing.json"
+
+    step "更新 Xray 模板"
+    backup="$(backup_xray_template)"
+    info "已备份当前 Xray 模板：$backup"
+    update_xray_template
+    rm -rf "$PREVIEW_DIR"
+    restart_xray
+
+    info ""
+    info "配置已更新。可在面板「路由 → 路由测试」中验证：baidu.com 应为 blocked，www.gstatic.com 应为 direct。"
+}
+
 run_deploy() {
     local backup
 
@@ -258,6 +301,25 @@ main() {
         info "已读取上次部署的参数和密钥：$STATE_FILE"
     fi
     PANEL_INSTALLED_BY_US="${STATE[PANEL_INSTALLED_BY_US]:-0}"
+
+    if [ "$CONFIG_ONLY" = "1" ]; then
+        [ "$DRY_RUN" != "1" ] || die "--config-only 不能和 --dry-run 同时使用。"
+        panel_installed || die "未安装 3x-ui，--config-only 只能用于已有面板。"
+        collect_params
+        detect_existing_panel
+        validate_config_params
+        print_summary
+        print_config_plan
+        if [ "$ASSUME_YES" != "1" ]; then
+            [ "$INTERACTIVE" = "1" ] || die "非交互运行时请加 -y 确认。"
+            confirm "确认更新配置？" || {
+                info "已取消。"
+                exit 0
+            }
+        fi
+        run_config_only
+        return 0
+    fi
 
     collect_params
     detect_existing_panel

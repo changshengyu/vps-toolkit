@@ -7,8 +7,9 @@
 | 功能 | 命令 | 说明 |
 |---|---|---|
 | 一键部署节点 | `deploy` | 安装 3x-ui，生成 4 个入站和分流规则，详见[文档](docs/deploy.md) |
-| 路由域策略 | `routing` | 把已有 3x-ui 的路由域策略改为 `IPIfNonMatch`，供旧机器使用 |
-| geodata 自动更新 | `geodata` | 为已有 3x-ui 开启 / 关闭 geoip、geosite 自动更新，供旧机器使用 |
+| 旧机器更新配置 | `deploy --config-only` | 把已有 3x-ui 的出站、路由和 geodata 统一到当前版本，不动入站 |
+| 路由域策略 | `routing` | 只把已有 3x-ui 的路由域策略改为 `IPIfNonMatch` |
+| geodata 自动更新 | `geodata` | 只为已有 3x-ui 开启 / 关闭 geoip、geosite 自动更新 |
 | Hysteria2 端口跳跃 | `hy2` | 用 nftables 重定向端口，重启后自动恢复，详见[文档](docs/hy2-port-hopping.md) |
 | 3x-ui 面板 | `3x-ui` | 运行 [3x-ui](https://github.com/MHSanaei/3x-ui) 官方安装脚本，详见[文档](docs/3x-ui.md) |
 | VPS 多功能工具箱 | `tools` | 运行 [vps_scripts](https://github.com/everett7623/vps_scripts) |
@@ -74,6 +75,7 @@ bash vps.sh
 bash vps.sh deploy              # 一键部署节点
 bash vps.sh deploy --dry-run    # 只预览，不改动系统
 bash vps.sh deploy --replace    # 重新部署，覆盖已有的同端口入站
+bash vps.sh deploy --config-only  # 旧机器只更新出站、路由和 geodata，不动入站
 bash vps.sh deploy --help       # 查看全部参数和选项
 bash vps.sh routing             # 已有 3x-ui 的路由域策略改为 IPIfNonMatch
 bash vps.sh geodata             # 已有 3x-ui 开启 geodata 自动更新（off 关闭）

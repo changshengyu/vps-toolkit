@@ -34,6 +34,9 @@ PARAM_SPECS=(
     "GEODATA_CRON|geodata-cron|geodata 自动更新时间（cron，UTC；off 关闭）|0 20 * * *|opt"
 )
 
+# --config-only 模式只用到这些参数（出站、路由和 geodata）
+CONFIG_ONLY_PARAMS=" ENABLE_AI_ROUTE SS_ISP_ADDR SS_ISP_PORT SS_ISP_PASS SS_ISP_METHOD GEODATA_CRON "
+
 # 摘要中只显示开头几位的参数
 SECRET_PARAMS=" CF_TOKEN SS_ISP_PASS PANEL_PASS "
 
@@ -212,8 +215,9 @@ collect_params() {
             value="${STATE[$var]}" source="上次部署"
         fi
 
-        # 未启用 AI 分流时跳过 SS 参数
-        if [[ "$kind" == ai* ]] && [ "${ENABLE_AI_ROUTE:-y}" != "y" ]; then
+        # 未启用 AI 分流时跳过 SS 参数；--config-only 时跳过与配置无关的参数
+        if { [[ "$kind" == ai* ]] && [ "${ENABLE_AI_ROUTE:-y}" != "y" ]; } ||
+            { [ "${CONFIG_ONLY:-0}" = "1" ] && [[ "$CONFIG_ONLY_PARAMS" != *" $var "* ]]; }; then
             printf -v "$var" '%s' "$value"
             PARAM_SOURCE[$var]="未使用"
             continue
@@ -259,6 +263,24 @@ is_port() {
 # 粗略检查 5 段 cron 表达式，准确校验由面板和 Xray 完成
 is_cron() {
     [[ "$1" =~ ^[0-9*/,-]+([[:space:]]+[0-9A-Za-z*/,-]+){4}$ ]]
+}
+
+# --config-only 模式的校验
+validate_config_params() {
+    local errors=()
+    case "$ENABLE_AI_ROUTE" in y | n) ;; *) errors+=("ENABLE_AI_ROUTE 只能是 y 或 n：$ENABLE_AI_ROUTE") ;; esac
+    if [ "$ENABLE_AI_ROUTE" = "y" ]; then
+        is_port "$SS_ISP_PORT" || errors+=("SS_ISP_PORT 不是有效端口：$SS_ISP_PORT")
+        [[ "$SS_ISP_ADDR" =~ ^[A-Za-z0-9.:-]+$ ]] || errors+=("SS_ISP_ADDR 格式无效：$SS_ISP_ADDR")
+    fi
+    if [ "$GEODATA_CRON" != "off" ] && [ -n "$GEODATA_CRON" ] && ! is_cron "$GEODATA_CRON"; then
+        errors+=("GEODATA_CRON 应为 5 段 cron 表达式（如 \"0 20 * * *\"）或 off：$GEODATA_CRON")
+    fi
+    if [ "${#errors[@]}" -gt 0 ]; then
+        warn "参数校验未通过："
+        printf '  - %s\n' "${errors[@]}" >&2
+        die "请修正后重试。"
+    fi
 }
 
 validate_params() {

@@ -59,6 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.s
 | `--replace` / `--no-replace` | 同端口已有入站时直接覆盖 / 直接跳过（默认询问，非交互时跳过） |
 | `--skip-firewall` | 不修改系统防火墙 |
 | `--skip-hop` | 不配置端口跳跃 |
+| `--config-only` | 只更新已有 3x-ui 的出站、路由和 geodata，见下文「旧机器只更新配置」 |
 | `--regen` | 重新生成全部密钥（已导入客户端的节点会失效） |
 
 ### 重新运行
@@ -179,6 +180,24 @@ UUID、订阅 ID、两套 Reality 密钥对和 shortIds、VLESS Encryption 密�
 第 4 条参考 Xray 官方服务端教程，按 `geoip:cn` 屏蔽。配合 `IPIfNonMatch`，访问国内网站（域名解析到国内 IP）会被屏蔽，代价是未命中规则的域名需要在服务器上多解析一次。
 
 **不要按域名屏蔽 `geosite:cn`**：这个列表包含 `www.gstatic.com`、`connectivitycheck.gstatic.com`，而 mihomo 默认用 `https://www.gstatic.com/generate_204` 测速，屏蔽后所有节点都会显示不可用（Xray 客户端不受影响）。这些域名在海外服务器上解析到的是海外 IP，按 IP 屏蔽不会误伤。
+
+### 旧机器只更新配置
+
+之前手动配置、或用旧版脚本部署的机器，可以只把配置统一到当前版本，入站、证书和面板设置都不动：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) deploy --config-only
+```
+
+只需要提供 AI 分流用的 SS 参数（或 `--ai-route n` 不启用）。会替换 Xray 模板中的：
+
+- 出站：direct、blocked、六六云 SS（**其他出站会被移除**，如 WARP）
+- 路由：`IPIfNonMatch` + 本文「路由规则」中的规则（**原有规则会被替换**）
+- geodata 自动更新
+
+修改前会备份当前模板到 `/root/.vps-toolkit/backup/`，需要时可在面板「Xray 配置 → 高级配置」中粘贴恢复。
+
+如果只想改其中一项、保留其他自定义配置，用下面的单项命令。
 
 ### 旧机器修改路由域策略
 
