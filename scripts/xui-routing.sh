@@ -32,19 +32,8 @@ HELP
     *) die "未知策略：$STRATEGY（可用：IPIfNonMatch、AsIs、IPOnDemand）" ;;
 esac
 
-# 从面板证书中取一个域名，用于本机 HTTPS 访问面板
-panel_cert_domain() {
-    local cert domain
-    cert="$("$XUI_BIN" setting -getCert true 2>/dev/null | awk -F': ' '/^cert:/ {print $2}' | tr -d '[:space:]' || true)"
-    [ -n "$cert" ] && [ -r "$cert" ] || return 0
-    domain="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null |
-        grep -o 'DNS:[^,[:space:]]*' | head -1 | cut -c5- || true)"
-    # 通配符证书用任意子域名访问即可
-    printf '%s' "${domain/#\*./vps-toolkit.}"
-}
-
 main() {
-    local current old merged file backup
+    local current old merged backup
 
     require_root
     ensure_packages jq openssl curl
@@ -55,8 +44,7 @@ main() {
     init_api
     wait_panel_ready
 
-    current="$(api POST /panel/api/xray/ | jq -c '.obj | if type == "string" then fromjson else . end
-        | .xraySetting | if type == "string" then fromjson else . end')"
+    current="$(get_xray_template)"
     old="$(jq -r '.routing.domainStrategy // "AsIs"' <<<"$current")"
     if [ "$old" = "$STRATEGY" ]; then
         info "路由域策略已是 $STRATEGY，无需修改。"
@@ -67,11 +55,7 @@ main() {
     info "已备份当前 Xray 模板：$backup"
 
     merged="$(jq -c --arg s "$STRATEGY" '.routing = ((.routing // {}) + {domainStrategy: $s})' <<<"$current")"
-    file="$(mktemp)"
-    chmod 600 "$file"
-    printf '%s' "$merged" >"$file"
-    api POST /panel/api/xray/update --data-urlencode "xraySetting@$file" >/dev/null
-    rm -f "$file"
+    save_xray_template "$merged"
     restart_xray
 
     info "路由域策略：$old -> $STRATEGY"

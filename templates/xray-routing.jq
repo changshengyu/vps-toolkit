@@ -1,4 +1,4 @@
-# Xray 模板中由脚本管理的部分：出站和路由规则
+# Xray 模板中由脚本管理的部分：出站、路由规则和 geodata 自动更新
 # 第二阶段会把它合并进面板当前的模板，其他字段（log、api、policy 等）保持不变。
 {
   outbounds: (
@@ -55,5 +55,14 @@
           {type: "field", protocol: ["bittorrent"], outboundTag: "blocked"}
         ]
     )
-  }
+  },
+  # geodata 自动更新（Xray-core 功能）：按 cron 下载并热加载，无需重启。
+  # cron 按服务器时区解析，VPS 通常为 UTC。只更新路由规则用到的两个文件。
+  geodata: (if $geodata_cron == "" or $geodata_cron == "off" then null else {
+    cron: $geodata_cron,
+    assets: [
+      {url: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat", file: "geoip.dat"},
+      {url: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat", file: "geosite.dat"}
+    ]
+  } end)
 }

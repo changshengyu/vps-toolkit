@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.s
 | 生成密钥 | 连同参数保存到 `/root/.vps-toolkit/state.env` |
 | 申请证书 | hy2 域名：HTTP 验证（或 `HY2_CERT_MODE=dns`），并设为面板证书；CDN 域名：CF Token DNS 验证，同时申请 `*.域名`；证书仍有效时跳过 |
 | 导入入站 | 通过面板 API 导入；同端口已有入站时询问是否覆盖 |
-| 更新模板 | 备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`，替换出站和路由规则，其他字段不变，然后重启 Xray 并检查状态 |
+| 更新模板 | 备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`，替换出站、路由规则和 geodata 自动更新，其他字段不变，然后重启 Xray 并检查状态 |
 | 端口跳跃 | 调用 `hy2-port-hopping.sh` |
 | 输出结果 | 面板地址、账号和分享链接，保存到 `/root/vps-deploy-result.txt`（权限 600） |
 
@@ -140,6 +140,7 @@ chmod 600 /root/.vps-toolkit/deploy.env
 | `REALITY_PORT` / `XHTTP_PORT` / `CDN_PORT` | | `443` / `30115` / `8443` |
 | `CDN_WS_PATH` / `XHTTP_PATH` | | 随机路径 |
 | `CLIENT_EMAIL` | | 随机生成 |
+| `GEODATA_CRON` | | `0 20 * * *`（UTC 20:00，即北京时间 04:00）；`off` 关闭 geodata 自动更新 |
 
 ## 自动生成的密钥
 
@@ -188,3 +189,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 ```
 
 修改前会备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`。在面板中对应「Xray 配置 → 基础配置 → 配置路由域策略」。
+
+## geodata 自动更新
+
+路由规则依赖 `geoip.dat` 和 `geosite.dat`。3x-ui 默认模板不会自动更新它们，一键部署会在 Xray 模板中加入 `geodata` 配置：Xray 按 cron 定时从 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) 下载这两个文件并热加载，无需重启。
+
+- 默认 `0 20 * * *`，按服务器时区解析。VPS 通常是 UTC，即北京时间每天 04:00
+- 部署时用 `--geodata-cron "表达式"` 修改，`--geodata-cron off` 关闭
+
+旧机器单独开启或关闭，入站和路由规则保持不变：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata              # 开启，默认每天 UTC 20:00
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata "0 3 * * 1"  # 自定义时间
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata off          # 关闭
+```

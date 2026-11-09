@@ -124,6 +124,7 @@ print_plan() {
    - $CDN_DOMAIN：DNS 验证（CF Token），只给 WS+TLS 入站使用
 4. 通过面板 API 导入 4 个入站，客户端 $CLIENT_EMAIL 共用订阅 ID ${SUB_ID:-（部署时生成）}
 5. 更新 Xray 模板：出站与路由（AI 分流：$([ "$ENABLE_AI_ROUTE" = "y" ] && printf '六六云 SS %s:%s' "$SS_ISP_ADDR" "$SS_ISP_PORT" || printf '未启用')）
+   geodata 自动更新：$([ "$GEODATA_CRON" = "off" ] || [ -z "$GEODATA_CRON" ] && printf '关闭' || printf 'cron "%s"（UTC）' "$GEODATA_CRON")
 6. 端口跳跃：UDP $HOP_RANGE -> $HY2_PORT
 7. 输出面板地址和分享链接到 $RESULT_FILE
 提醒：云厂商安全组需要手动放行第 2 步中的端口。

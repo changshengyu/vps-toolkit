@@ -31,6 +31,7 @@ PARAM_SPECS=(
     "CDN_WS_PATH|ws-path|WS 路径|@rand_path|opt"
     "XHTTP_PATH|xhttp-path|XHTTP 路径|@rand_path|opt"
     "CLIENT_EMAIL|client-email|客户端标识（email）|@rand_str10|opt"
+    "GEODATA_CRON|geodata-cron|geodata 自动更新时间（cron，UTC；off 关闭）|0 20 * * *|opt"
 )
 
 # 摘要中只显示开头几位的参数
@@ -255,6 +256,11 @@ is_port() {
     [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$((10#$1))" -ge 1 ] && [ "$((10#$1))" -le 65535 ]
 }
 
+# 粗略检查 5 段 cron 表达式，准确校验由面板和 Xray 完成
+is_cron() {
+    [[ "$1" =~ ^[0-9*/,-]+([[:space:]]+[0-9A-Za-z*/,-]+){4}$ ]]
+}
+
 validate_params() {
     local errors=() p start end
 
@@ -314,6 +320,10 @@ validate_params() {
     fi
     [[ "$CLIENT_EMAIL" =~ ^[A-Za-z0-9._@-]+$ ]] || errors+=("CLIENT_EMAIL 只能包含字母、数字和 ._@-：$CLIENT_EMAIL")
     [[ "$NODE_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || errors+=("NODE_NAME 只能包含字母、数字和 ._-：$NODE_NAME")
+
+    if [ "$GEODATA_CRON" != "off" ] && [ -n "$GEODATA_CRON" ] && ! is_cron "$GEODATA_CRON"; then
+        errors+=("GEODATA_CRON 应为 5 段 cron 表达式（如 \"0 20 * * *\"）或 off：$GEODATA_CRON")
+    fi
 
     if [ "${#errors[@]}" -gt 0 ]; then
         warn "参数校验未通过："

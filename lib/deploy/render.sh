@@ -50,6 +50,7 @@ render_routing() {
         --arg ss_port "${SS_ISP_PORT:-0}" \
         --arg ss_method "$SS_ISP_METHOD" \
         --arg ss_pass "$SS_ISP_PASS" \
+        --arg geodata_cron "$GEODATA_CRON" \
         -f "$TEMPLATE_DIR/xray-routing.jq"
 }
 

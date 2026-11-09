@@ -8,6 +8,7 @@
 |---|---|---|
 | 一键部署节点 | `deploy` | 安装 3x-ui，生成 4 个入站和分流规则，详见[文档](docs/deploy.md) |
 | 路由域策略 | `routing` | 把已有 3x-ui 的路由域策略改为 `IPIfNonMatch`，供旧机器使用 |
+| geodata 自动更新 | `geodata` | 为已有 3x-ui 开启 / 关闭 geoip、geosite 自动更新，供旧机器使用 |
 | Hysteria2 端口跳跃 | `hy2` | 用 nftables 重定向端口，重启后自动恢复，详见[文档](docs/hy2-port-hopping.md) |
 | 3x-ui 面板 | `3x-ui` | 运行 [3x-ui](https://github.com/MHSanaei/3x-ui) 官方安装脚本，详见[文档](docs/3x-ui.md) |
 | VPS 多功能工具箱 | `tools` | 运行 [vps_scripts](https://github.com/everett7623/vps_scripts) |
@@ -21,7 +22,7 @@
 | VLESS + Reality + XHTTP | TCP 30115 | 外加 VLESS Encryption（ML-KEM-768） |
 | VLESS + WS + TLS | TCP 8443 | 经 Cloudflare CDN |
 
-4 个入站共用一个客户端和订阅 ID。分流规则：AI 网站走 ISP 出站，屏蔽回国流量（`geoip:cn`）、内网地址和 BT。
+4 个入站共用一个客户端和订阅 ID。分流规则：AI 网站走 ISP 出站，屏蔽回国流量（`geoip:cn`）、内网地址和 BT。geoip、geosite 每天北京时间 04:00 自动更新。
 
 ## 快速开始
 
@@ -75,6 +76,7 @@ bash vps.sh deploy --dry-run    # 只预览，不改动系统
 bash vps.sh deploy --replace    # 重新部署，覆盖已有的同端口入站
 bash vps.sh deploy --help       # 查看全部参数和选项
 bash vps.sh routing             # 已有 3x-ui 的路由域策略改为 IPIfNonMatch
+bash vps.sh geodata             # 已有 3x-ui 开启 geodata 自动更新（off 关闭）
 bash vps.sh hy2 install         # 安装或更新端口跳跃规则
 bash vps.sh hy2 status          # 查看端口跳跃状态
 bash vps.sh hy2 uninstall       # 卸载端口跳跃规则
