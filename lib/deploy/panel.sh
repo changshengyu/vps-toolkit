@@ -139,8 +139,7 @@ backup_xray_template() {
     mkdir -p "$dir"
     chmod 700 "$dir"
     file="$dir/xray-template-$(date +%Y%m%d-%H%M%S).json"
-    api POST /panel/api/xray/ | jq '.obj | if type == "string" then fromjson else . end
-        | .xraySetting | if type == "string" then fromjson else . end' >"$file"
+    get_xray_template | jq . >"$file"
     chmod 600 "$file"
     printf '%s' "$file"
 }
@@ -192,24 +191,36 @@ import_inbounds() {
     done
 }
 
+# 读取面板当前的 Xray 模板（JSON 对象）
+get_xray_template() {
+    api POST /panel/api/xray/ | jq -c '.obj | if type == "string" then fromjson else . end
+        | .xraySetting | if type == "string" then fromjson else . end'
+}
+
+# 保存 Xray 模板，参数为模板 JSON
+save_xray_template() {
+    local file
+    file="$(mktemp)"
+    chmod 600 "$file"
+    printf '%s' "$1" >"$file"
+    api POST /panel/api/xray/update --data-urlencode "xraySetting@$file" >/dev/null
+    rm -f "$file"
+}
+
 update_xray_template() {
-    local current patch merged file
-    current="$(api POST /panel/api/xray/ | jq -c '.obj | if type == "string" then fromjson else . end
-        | .xraySetting | if type == "string" then fromjson else . end')"
+    local current patch merged
+    current="$(get_xray_template)"
     patch="$(cat "$PREVIEW_DIR/payload/xray-routing.json")"
 
-    # 出站和路由规则整体替换，其余字段（log、api、policy 等）保持不变
+    # 出站、路由规则和 geodata 自动更新整体替换，其余字段（log、api、policy 等）保持不变
     merged="$(jq -c --argjson p "$patch" '
         .outbounds = $p.outbounds
         | .routing = ((.routing // {}) + {domainStrategy: $p.routing.domainStrategy, rules: $p.routing.rules})
+        | if $p.geodata then .geodata = $p.geodata else del(.geodata) end
     ' <<<"$current")"
 
-    file="$(mktemp)"
-    chmod 600 "$file"
-    printf '%s' "$merged" >"$file"
-    api POST /panel/api/xray/update --data-urlencode "xraySetting@$file" >/dev/null
-    rm -f "$file"
-    info "已更新 Xray 模板（出站与路由）。"
+    save_xray_template "$merged"
+    info "已更新 Xray 模板（出站、路由与 geodata 自动更新）。"
 }
 
 restart_xray() {
@@ -232,4 +243,15 @@ restart_xray() {
 
 fetch_links() {
     api GET /panel/api/inbounds/allLinks | jq -r '.obj[]?'
+}
+
+# 从面板证书中取一个域名，用于本机 HTTPS 访问面板
+panel_cert_domain() {
+    local cert domain
+    cert="$("$XUI_BIN" setting -getCert true 2>/dev/null | awk -F': ' '/^cert:/ {print $2}' | tr -d '[:space:]' || true)"
+    [ -n "$cert" ] && [ -r "$cert" ] || return 0
+    domain="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null |
+        grep -o 'DNS:[^,[:space:]]*' | head -1 | cut -c5- || true)"
+    # 通配符证书用任意子域名访问即可
+    printf '%s' "${domain/#\*./vps-toolkit.}"
 }

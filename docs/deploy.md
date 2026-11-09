@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.s
 | 生成密钥 | 连同参数保存到 `/root/.vps-toolkit/state.env` |
 | 申请证书 | hy2 域名：HTTP 验证（或 `HY2_CERT_MODE=dns`），并设为面板证书；CDN 域名：CF Token DNS 验证，同时申请 `*.域名`；证书仍有效时跳过 |
 | 导入入站 | 通过面板 API 导入；同端口已有入站时询问是否覆盖 |
-| 更新模板 | 备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`，替换出站和路由规则，其他字段不变，然后重启 Xray 并检查状态 |
+| 更新模板 | 备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`，替换出站、路由规则和 geodata 自动更新，其他字段不变，然后重启 Xray 并检查状态 |
 | 端口跳跃 | 调用 `hy2-port-hopping.sh` |
 | 输出结果 | 面板地址、账号和分享链接，保存到 `/root/vps-deploy-result.txt`（权限 600） |
 
@@ -59,6 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.s
 | `--replace` / `--no-replace` | 同端口已有入站时直接覆盖 / 直接跳过（默认询问，非交互时跳过） |
 | `--skip-firewall` | 不修改系统防火墙 |
 | `--skip-hop` | 不配置端口跳跃 |
+| `--config-only` | 只更新已有 3x-ui 的出站、路由和 geodata，见下文「旧机器只更新配置」 |
 | `--regen` | 重新生成全部密钥（已导入客户端的节点会失效） |
 
 ### 重新运行
@@ -140,6 +141,7 @@ chmod 600 /root/.vps-toolkit/deploy.env
 | `REALITY_PORT` / `XHTTP_PORT` / `CDN_PORT` | | `443` / `30115` / `8443` |
 | `CDN_WS_PATH` / `XHTTP_PATH` | | 随机路径 |
 | `CLIENT_EMAIL` | | 随机生成 |
+| `GEODATA_CRON` | | `0 20 * * *`（UTC 20:00，即北京时间 04:00）；`off` 关闭 geodata 自动更新 |
 
 ## 自动生成的密钥
 
@@ -179,6 +181,24 @@ UUID、订阅 ID、两套 Reality 密钥对和 shortIds、VLESS Encryption 密�
 
 **不要按域名屏蔽 `geosite:cn`**：这个列表包含 `www.gstatic.com`、`connectivitycheck.gstatic.com`，而 mihomo 默认用 `https://www.gstatic.com/generate_204` 测速，屏蔽后所有节点都会显示不可用（Xray 客户端不受影响）。这些域名在海外服务器上解析到的是海外 IP，按 IP 屏蔽不会误伤。
 
+### 旧机器只更新配置
+
+之前手动配置、或用旧版脚本部署的机器，可以只把配置统一到当前版本，入站、证书和面板设置都不动：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) deploy --config-only
+```
+
+只需要提供 AI 分流用的 SS 参数（或 `--ai-route n` 不启用）。会替换 Xray 模板中的：
+
+- 出站：direct、blocked、六六云 SS（**其他出站会被移除**，如 WARP）
+- 路由：`IPIfNonMatch` + 本文「路由规则」中的规则（**原有规则会被替换**）
+- geodata 自动更新
+
+修改前会备份当前模板到 `/root/.vps-toolkit/backup/`，需要时可在面板「Xray 配置 → 高级配置」中粘贴恢复。
+
+如果只想改其中一项、保留其他自定义配置，用下面的单项命令。
+
 ### 旧机器修改路由域策略
 
 一键部署的机器已经是 `IPIfNonMatch`。之前手动配置的 3x-ui，可以只修改这一项，入站和路由规则保持不变：
@@ -188,3 +208,18 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 ```
 
 修改前会备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`。在面板中对应「Xray 配置 → 基础配置 → 配置路由域策略」。
+
+## geodata 自动更新
+
+路由规则依赖 `geoip.dat` 和 `geosite.dat`。3x-ui 默认模板不会自动更新它们，一键部署会在 Xray 模板中加入 `geodata` 配置：Xray 按 cron 定时从 [Loyalsoldier/v2ray-rules-dat](https://github.com/Loyalsoldier/v2ray-rules-dat) 下载这两个文件并热加载，无需重启。
+
+- 默认 `0 20 * * *`，按服务器时区解析。VPS 通常是 UTC，即北京时间每天 04:00
+- 部署时用 `--geodata-cron "表达式"` 修改，`--geodata-cron off` 关闭
+
+旧机器单独开启或关闭，入站和路由规则保持不变：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata              # 开启，默认每天 UTC 20:00
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata "0 3 * * 1"  # 自定义时间
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata off          # 关闭
+```
