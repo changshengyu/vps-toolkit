@@ -111,7 +111,7 @@ bash vps.sh tools               # 打开工具箱
 
 ## 重装系统前
 
-参数和密钥保存在 `/root/.vps-toolkit/state.env`，重跑脚本时直接复用，客户端里的节点保持可用。重装系统前把它备份出来，重装后放回原处再运行 `deploy`，就不用重新导入节点。
+参数和密钥保存在 `/root/.vps-toolkit/state.env`（权限 600，包含 Reality 私钥、CF Token 和 SS 密码，请妥善保管），重跑脚本时直接复用，客户端里的节点保持可用。重装系统前把它备份出来，重装后放回原处再运行 `deploy`，就不用重新导入节点。
 
 想更换全部密钥（例如链接泄露后），运行 `deploy --regen --replace`。
 

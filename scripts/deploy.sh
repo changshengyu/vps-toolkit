@@ -115,12 +115,16 @@ print_plan() {
         panel_line="安装最新版：端口 $PANEL_PORT，访问路径 /$PANEL_PATH"
     fi
 
+    # HTTP 验证模式下，证书续期也要用 TCP 80，需要一直放行
+    local port80=""
+    [ "$HY2_CERT_MODE" = "http" ] && port80=" 80（证书申请与续期）"
+
     cat <<PLAN
 
 ==================== 部署计划 ====================
 1. 3x-ui：$panel_line
 2. 防火墙放行（先放行当前 SSH 端口）：
-   TCP $PANEL_PORT（面板） $REALITY_PORT（Reality） $XHTTP_PORT（XHTTP） $CDN_PORT（CDN）$([ "$HY2_CERT_MODE" = "http" ] && printf ' 80（证书）')
+   TCP $PANEL_PORT（面板） $REALITY_PORT（Reality） $XHTTP_PORT（XHTTP） $CDN_PORT（CDN）$port80
    UDP $HY2_PORT（hy2） $HOP_RANGE（端口跳跃）
 3. 证书（/root/cert/<域名>/，续期后自动重启 x-ui）：
    - $HY2_DOMAIN：$hy2_cert，同时设为面板证书
@@ -172,8 +176,9 @@ write_result() {
         fi
         printf '\n客户端：%s，订阅 ID：%s\n\n分享链接：\n' "$CLIENT_EMAIL" "$SUB_ID"
         fetch_links
-        printf '\n云厂商安全组需放行：TCP %s %s %s %s；UDP %s %s\n' \
-            "$PANEL_PORT" "$REALITY_PORT" "$XHTTP_PORT" "$CDN_PORT" "$HY2_PORT" "$HOP_RANGE"
+        printf '\n云厂商安全组需放行：TCP %s %s %s %s%s；UDP %s %s\n' \
+            "$PANEL_PORT" "$REALITY_PORT" "$XHTTP_PORT" "$CDN_PORT" \
+            "$([ "$HY2_CERT_MODE" = "http" ] && printf ' 80' || true)" "$HY2_PORT" "$HOP_RANGE"
     } >"$RESULT_FILE"
     chmod 600 "$RESULT_FILE"
     umask "$prev_umask"
