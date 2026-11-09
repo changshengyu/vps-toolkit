@@ -36,7 +36,8 @@
       }] else [] end)
   ),
   routing: {
-    domainStrategy: "AsIs",
+    # 入站开启了 routeOnly 嗅探，路由看到的多是域名；IPIfNonMatch 让 IP 规则也能作用于域名请求
+    domainStrategy: "IPIfNonMatch",
     rules: (
       [{type: "field", inboundTag: ["api"], outboundTag: "api"}]
       + (if $ai == "y" then [
@@ -45,9 +46,12 @@
           {type: "field", domain: ["geosite:category-ai-!cn"], network: "tcp", outboundTag: "六六云-ISP"}
         ] else [] end)
       + [
-          # 同一条规则里的 domain 和 ip 需要同时满足，所以拆成两条
-          {type: "field", domain: ["geosite:cn"], outboundTag: "blocked"},
-          {type: "field", ip: ["geoip:cn", "geoip:private"], outboundTag: "blocked"},
+          # 屏蔽回国流量：按 IP 判断（Xray 官方服务端教程的做法）。
+          # 配合 domainStrategy IPIfNonMatch，未命中规则的域名会被解析成 IP 再匹配，
+          # 所以解析到国内 IP 的网站也会被屏蔽。
+          # 不要按域名屏蔽 geosite:cn：该列表包含 www.gstatic.com 等域名，
+          # 会屏蔽 mihomo 的默认测速地址，导致节点全部显示不可用。
+          {type: "field", ip: ["geoip:private", "geoip:cn"], outboundTag: "blocked"},
           {type: "field", protocol: ["bittorrent"], outboundTag: "blocked"}
         ]
     )
