@@ -11,8 +11,7 @@
   settings: {
     clients: [$client + {id: $uuid, flow: "xtls-rprx-vision"}],
     decryption: $vless_dec,
-    encryption: $vless_enc,
-    fallbacks: []
+    encryption: $vless_enc
   },
   streamSettings: {
     network: "xhttp",

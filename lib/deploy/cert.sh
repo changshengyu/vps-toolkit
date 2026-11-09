@@ -4,6 +4,20 @@
 
 ACME="${HOME:-/root}/.acme.sh/acme.sh"
 CERT_RELOAD_CMD="systemctl restart x-ui"
+ACME_LOG="${DEPLOY_HOME:-/root/.vps-toolkit}/acme.log"
+
+# acme.sh 输出较多，写入日志，失败时显示最后几行
+acme_run() {
+    mkdir -p "$(dirname "$ACME_LOG")"
+    printf '\n===== %s acme.sh %s\n' "$(date '+%F %T')" "$*" >>"$ACME_LOG"
+    "$@" >>"$ACME_LOG" 2>&1
+}
+
+acme_fail() {
+    warn "acme.sh 日志（$ACME_LOG）最后 15 行："
+    tail -n 15 "$ACME_LOG" >&2 || true
+    die "$1"
+}
 
 cert_dir() { printf '/root/cert/%s' "$1"; }
 
@@ -50,8 +64,8 @@ install_cert() {
     "$ACME" --installcert -d "$domain" "$@" \
         --key-file "$dir/privkey.pem" \
         --fullchain-file "$dir/fullchain.pem" \
-        --reloadcmd "$CERT_RELOAD_CMD" >/dev/null ||
-        die "安装证书失败：$domain"
+        --reloadcmd "$CERT_RELOAD_CMD" >>"$ACME_LOG" 2>&1 ||
+        acme_fail "安装证书失败：$domain"
     chmod 600 "$dir/privkey.pem"
     chmod 644 "$dir/fullchain.pem"
 }
@@ -63,8 +77,8 @@ issue_cert_http() {
 
     ensure_acme
     info "申请证书（HTTP 验证）：$domain"
-    "$ACME" --issue -d "$domain" --standalone --httpport 80 "${listen[@]}" || rc=$?
-    acme_ok "$rc" || die "证书申请失败：$domain。请确认域名已解析到本机（灰云）且 TCP 80 可从公网访问。"
+    acme_run "$ACME" --issue -d "$domain" --standalone --httpport 80 "${listen[@]}" || rc=$?
+    acme_ok "$rc" || acme_fail "证书申请失败：$domain。请确认域名已解析到本机（灰云）且 TCP 80 可从公网访问。"
     install_cert "$domain"
 }
 
@@ -74,9 +88,9 @@ issue_cert_dns() {
     [ "$wildcard" = "1" ] && names+=(-d "*.$domain")
 
     ensure_acme
-    info "申请证书（DNS 验证）：$domain"
-    CF_Token="$CF_TOKEN" "$ACME" --issue --dns dns_cf "${names[@]}" || rc=$?
-    acme_ok "$rc" || die "证书申请失败：$domain。请检查 CF Token 是否有该域名的 Zone:DNS:Edit 权限。"
+    info "申请证书（DNS 验证，约需 1 分钟）：$domain"
+    (export CF_Token="$CF_TOKEN" && acme_run "$ACME" --issue --dns dns_cf "${names[@]}") || rc=$?
+    acme_ok "$rc" || acme_fail "证书申请失败：$domain。请检查 CF Token 是否有该域名的 Zone:DNS:Edit 权限。"
     install_cert "$domain" "${names[@]:2}"
 }
 

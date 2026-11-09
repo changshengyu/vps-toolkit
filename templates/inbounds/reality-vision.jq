@@ -12,8 +12,7 @@
     clients: [$client + {id: $uuid, flow: "xtls-rprx-vision"}],
     decryption: "none",
     encryption: "none",
-    testseed: [900, 500, 900, 256],
-    fallbacks: []
+    testseed: [900, 500, 900, 256]
   },
   streamSettings: {
     network: "tcp",

@@ -11,8 +11,7 @@
   settings: {
     clients: [$client + {id: $uuid, flow: ""}],
     decryption: "none",
-    encryption: "none",
-    fallbacks: []
+    encryption: "none"
   },
   streamSettings: {
     network: "ws",
