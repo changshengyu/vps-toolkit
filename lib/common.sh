@@ -49,3 +49,27 @@ run_remote_script() {
     rm -f "$script"
     return "$rc"
 }
+
+# 缺少命令时用系统包管理器安装（需要 root）
+ensure_packages() {
+    local missing=() cmd
+    for cmd in "$@"; do
+        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+    done
+    [ "${#missing[@]}" -eq 0 ] && return 0
+
+    [ "$(id -u)" -eq 0 ] || die "缺少命令：${missing[*]}，请先安装，或用 root 运行以便自动安装。"
+    info "正在安装：${missing[*]}"
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get update -y >/dev/null && apt-get install -y "${missing[@]}" >/dev/null
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y "${missing[@]}" >/dev/null
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y "${missing[@]}" >/dev/null
+    else
+        die "无法自动安装 ${missing[*]}，请手动安装后重试。"
+    fi
+    for cmd in "${missing[@]}"; do
+        command -v "$cmd" >/dev/null 2>&1 || die "安装 $cmd 失败。"
+    done
+}
