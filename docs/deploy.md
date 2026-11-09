@@ -163,16 +163,21 @@ UUID、订阅 ID、两套 Reality 密钥对和 shortIds、VLESS Encryption 密�
 
 ## 路由规则
 
+`domainStrategy` 为 `IPIfNonMatch`：一轮匹配没有命中时，把域名解析成 IP 再匹配一次。
+
 1. api → api
 2. AI 网站 UDP 443 → 屏蔽（迫使客户端改用 TCP）
 3. AI 网站 TCP → 六六云 SS
-4. `geosite:cn` → 屏蔽
-5. `geoip:cn`、`geoip:private` → 屏蔽
-6. BT → 屏蔽
+4. `geoip:private`、`geoip:cn` → 屏蔽（防止回国流量）
+5. BT → 屏蔽
 
 未启用 AI 分流时，去掉第 2、3 条和 SS 出站。
 
-Xray 的一条规则里同时写 `domain` 和 `ip` 时，需要两者同时满足才会匹配，所以第 4、5 条分开写。
+### 为什么按 IP 而不是按域名屏蔽回国流量
+
+第 4 条参考 Xray 官方服务端教程，按 `geoip:cn` 屏蔽。配合 `IPIfNonMatch`，访问国内网站（域名解析到国内 IP）会被屏蔽，代价是未命中规则的域名需要在服务器上多解析一次。
+
+**不要按域名屏蔽 `geosite:cn`**：这个列表包含 `www.gstatic.com`、`connectivitycheck.gstatic.com`，而 mihomo 默认用 `https://www.gstatic.com/generate_204` 测速，屏蔽后所有节点都会显示不可用（Xray 客户端不受影响）。这些域名在海外服务器上解析到的是海外 IP，按 IP 屏蔽不会误伤。
 
 ### 旧机器修改路由域策略
 
@@ -183,4 +188,3 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 ```
 
 修改前会备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`。在面板中对应「Xray 配置 → 基础配置 → 配置路由域策略」。
-
