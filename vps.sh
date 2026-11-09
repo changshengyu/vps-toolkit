@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 个人 VPS 工具集入口
-# 用法：bash vps.sh [deploy|hy2|3x-ui|routing|geodata|tools|help] [操作]
+# 用法：bash vps.sh [命令] [操作]，无参数时打开菜单
 
 set -euo pipefail
 
@@ -51,9 +51,58 @@ show_help() {
   3x-ui install|status       安装 3x-ui 或查看状态
   routing [策略]             修改 3x-ui 路由域策略（默认 IPIfNonMatch）
   geodata [cron|off]         开启 / 关闭 3x-ui 的 geodata 自动更新
+  result                     查看上次部署结果
+  shortcut                   安装快捷命令 vt
   tools [上游参数]           运行 VPS 多功能工具箱
   help                       显示帮助
 HELP
+}
+
+RESULT_FILE="/root/vps-deploy-result.txt"
+SHORTCUT="/usr/local/bin/vt"
+REPO_RAW_SCRIPT="https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh"
+
+# 终端支持时输出颜色
+if [ -t 1 ]; then
+    C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_RED=$'\033[31m' C_BOLD=$'\033[1m' C_RESET=$'\033[0m'
+else
+    C_GREEN="" C_YELLOW="" C_RED="" C_BOLD="" C_RESET=""
+fi
+
+status_xui() {
+    if [ ! -x /usr/local/x-ui/x-ui ]; then
+        printf '%s未安装%s' "$C_YELLOW" "$C_RESET"
+    elif systemctl is-active --quiet x-ui 2>/dev/null; then
+        printf '%s运行中%s' "$C_GREEN" "$C_RESET"
+    else
+        printf '%s未运行%s' "$C_RED" "$C_RESET"
+    fi
+}
+
+status_hop() {
+    if systemctl is-active --quiet hy2jump 2>/dev/null; then
+        printf '%s已启用%s' "$C_GREEN" "$C_RESET"
+    else
+        printf '%s未启用%s' "$C_YELLOW" "$C_RESET"
+    fi
+}
+
+status_result() {
+    if [ -f "$RESULT_FILE" ]; then
+        printf '%s有%s' "$C_GREEN" "$C_RESET"
+    else
+        printf '无'
+    fi
+}
+
+pause() {
+    printf '\n'
+    read -r -p "按回车返回菜单..." _ || exit 0
+}
+
+# 运行子脚本，失败时提示并返回菜单
+run() {
+    "$@" || warn "操作未完成（退出码 $?）。"
 }
 
 hy2_install_prompt() {
@@ -70,100 +119,106 @@ hy2_install_prompt() {
         bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" install
 }
 
-hy2_menu() {
-    local choice
-
-    cat <<MENU
-
-Hysteria2 端口跳跃
-1. 安装或更新规则
-2. 查看状态
-3. 卸载
-0. 返回
-MENU
-    read -r -p "请选择: " choice
-
-    case "$choice" in
-        1) hy2_install_prompt ;;
-        2) bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" status ;;
-        3)
-            if confirm "确认卸载端口跳跃规则？"; then
-                bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" uninstall
-            fi
-            ;;
-        0) ;;
-        *) warn "无效选择。" ;;
-    esac
+geodata_custom() {
+    local cron
+    read -r -p "cron 表达式（按服务器时区，通常为 UTC）[0 20 * * *]: " cron
+    bash "$ROOT_DIR/scripts/xui-geodata.sh" "${cron:-0 20 * * *}"
 }
 
-xui_menu() {
-    local choice
-
-    cat <<MENU
-
-3x-ui 面板
-1. 安装
-2. 查看状态
-3. 路由域策略改为 IPIfNonMatch
-4. 开启 geodata 自动更新（每天北京时间 04:00）
-0. 返回
-MENU
-    read -r -p "请选择: " choice
-
-    case "$choice" in
-        1) bash "$ROOT_DIR/scripts/3x-ui.sh" install ;;
-        2) bash "$ROOT_DIR/scripts/3x-ui.sh" status ;;
-        3) bash "$ROOT_DIR/scripts/xui-routing.sh" IPIfNonMatch ;;
-        4) bash "$ROOT_DIR/scripts/xui-geodata.sh" ;;
-        0) ;;
-        *) warn "无效选择。" ;;
-    esac
+show_result() {
+    if [ -f "$RESULT_FILE" ]; then
+        cat "$RESULT_FILE"
+    else
+        info "还没有部署结果，请先运行一键部署。"
+    fi
 }
 
-deploy_menu() {
-    local choice
+# 安装快捷命令：之后输入 vt 即可打开菜单（每次运行仓库最新版）
+install_shortcut() {
+    require_root
+    if [ -e "$SHORTCUT" ] && ! grep -q "vps-toolkit" "$SHORTCUT" 2>/dev/null; then
+        die "$SHORTCUT 已存在且不是本工具创建的，未覆盖。"
+    fi
+    cat >"$SHORTCUT" <<SCRIPT
+#!/usr/bin/env bash
+# vps-toolkit 快捷命令：运行仓库最新版
+exec bash <(curl -fsSL $REPO_RAW_SCRIPT) "\$@"
+SCRIPT
+    chmod 755 "$SHORTCUT"
+    info "已安装快捷命令：输入 vt 打开菜单，也可以直接带参数，如 vt deploy --config-only。"
+}
 
+print_menu() {
     cat <<MENU
 
-一键部署 3x-ui 节点
-1. 预览配置（不改动系统）
-2. 正式部署
-0. 返回
-MENU
-    read -r -p "请选择: " choice
+${C_BOLD}╔══════════════════════════════════════════════╗
+║                 vps-toolkit                  ║
+╚══════════════════════════════════════════════╝${C_RESET}
+  3x-ui：$(status_xui)    端口跳跃：$(status_hop)    部署结果：$(status_result)
 
-    case "$choice" in
-        1) bash "$ROOT_DIR/scripts/deploy.sh" --dry-run ;;
-        2) bash "$ROOT_DIR/scripts/deploy.sh" ;;
-        0) ;;
-        *) warn "无效选择。" ;;
-    esac
+  ${C_BOLD}节点部署${C_RESET}
+  ${C_GREEN}1.${C_RESET}  一键部署节点
+  ${C_GREEN}2.${C_RESET}  预览部署配置（不改动系统）
+  ${C_GREEN}3.${C_RESET}  重新部署（覆盖已有的同端口入站）
+  ${C_GREEN}4.${C_RESET}  旧机器只更新配置（出站、路由、geodata）
+  ${C_GREEN}5.${C_RESET}  查看部署结果（面板地址、分享链接）
+
+  ${C_BOLD}3x-ui 面板${C_RESET}
+  ${C_GREEN}6.${C_RESET}  安装 3x-ui
+  ${C_GREEN}7.${C_RESET}  查看 3x-ui 状态
+  ${C_GREEN}8.${C_RESET}  路由域策略改为 IPIfNonMatch
+  ${C_GREEN}9.${C_RESET}  开启 geodata 自动更新（每天北京时间 04:00）
+  ${C_GREEN}10.${C_RESET} 自定义 geodata 更新时间
+  ${C_GREEN}11.${C_RESET} 关闭 geodata 自动更新
+
+  ${C_BOLD}Hysteria2 端口跳跃${C_RESET}
+  ${C_GREEN}12.${C_RESET} 安装或更新规则
+  ${C_GREEN}13.${C_RESET} 查看状态
+  ${C_GREEN}14.${C_RESET} 卸载
+
+  ${C_BOLD}其他${C_RESET}
+  ${C_GREEN}15.${C_RESET} VPS 多功能工具箱
+  ${C_GREEN}16.${C_RESET} 安装快捷命令 vt
+  ${C_GREEN}0.${C_RESET}  退出
+MENU
 }
 
 main_menu() {
     local choice
 
     while true; do
-        cat <<MENU
+        print_menu
+        read -r -p "请输入选项 [0-16]: " choice || exit 0
+        printf '\n'
 
-VPS 工具集
-1. 一键部署 3x-ui 节点
-2. Hysteria2 端口跳跃
-3. 3x-ui 面板
-4. VPS 多功能工具箱
-0. 退出
-MENU
-        read -r -p "请选择: " choice || exit 0
-
-        # 子脚本失败时返回菜单，不退出整个工具
         case "$choice" in
-            1) deploy_menu || warn "操作失败。" ;;
-            2) hy2_menu || warn "操作失败。" ;;
-            3) xui_menu || warn "操作失败。" ;;
-            4) bash "$ROOT_DIR/scripts/vps-tools.sh" || warn "工具箱异常退出。" ;;
+            1) run bash "$ROOT_DIR/scripts/deploy.sh" ;;
+            2) run bash "$ROOT_DIR/scripts/deploy.sh" --dry-run ;;
+            3) run bash "$ROOT_DIR/scripts/deploy.sh" --replace ;;
+            4) run bash "$ROOT_DIR/scripts/deploy.sh" --config-only ;;
+            5) show_result ;;
+            6) run bash "$ROOT_DIR/scripts/3x-ui.sh" install ;;
+            7) run bash "$ROOT_DIR/scripts/3x-ui.sh" status ;;
+            8) run bash "$ROOT_DIR/scripts/xui-routing.sh" IPIfNonMatch ;;
+            9) run bash "$ROOT_DIR/scripts/xui-geodata.sh" ;;
+            10) run geodata_custom ;;
+            11) run bash "$ROOT_DIR/scripts/xui-geodata.sh" off ;;
+            12) run hy2_install_prompt ;;
+            13) run bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" status ;;
+            14)
+                if confirm "确认卸载端口跳跃规则？"; then
+                    run bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" uninstall
+                fi
+                ;;
+            15) run bash "$ROOT_DIR/scripts/vps-tools.sh" ;;
+            16) run install_shortcut ;;
             0) exit 0 ;;
-            *) warn "无效选择。" ;;
+            *)
+                warn "无效选项：$choice"
+                continue
+                ;;
         esac
+        pause
     done
 }
 
@@ -177,6 +232,8 @@ case "${1:-menu}" in
     3x-ui) bash "$ROOT_DIR/scripts/3x-ui.sh" "${2:-status}" ;;
     routing) bash "$ROOT_DIR/scripts/xui-routing.sh" "${2:-IPIfNonMatch}" ;;
     geodata) bash "$ROOT_DIR/scripts/xui-geodata.sh" "${2:-0 20 * * *}" ;;
+    result) show_result ;;
+    shortcut) install_shortcut ;;
     tools)
         shift
         bash "$ROOT_DIR/scripts/vps-tools.sh" "$@"

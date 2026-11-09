@@ -61,7 +61,25 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh)
 ```
 
-或者克隆仓库后运行：
+菜单顶部显示 3x-ui、端口跳跃和部署结果的状态，输入数字选择功能，执行完回到菜单：
+
+```
+  节点部署                         3x-ui 面板
+  1.  一键部署节点                 6.  安装 3x-ui
+  2.  预览部署配置                 7.  查看 3x-ui 状态
+  3.  重新部署（覆盖入站）         8.  路由域策略改为 IPIfNonMatch
+  4.  旧机器只更新配置             9.  开启 geodata 自动更新
+  5.  查看部署结果                 10. 自定义 geodata 更新时间
+                                   11. 关闭 geodata 自动更新
+  Hysteria2 端口跳跃               其他
+  12. 安装或更新规则               15. VPS 多功能工具箱
+  13. 查看状态                     16. 安装快捷命令 vt
+  14. 卸载                         0.  退出
+```
+
+选 16 安装快捷命令后，以后直接输入 `vt` 打开菜单（每次运行仓库最新版），也可以带参数，如 `vt deploy --config-only`。
+
+也可以克隆仓库后运行：
 
 ```bash
 git clone https://github.com/changshengyu/vps-toolkit.git
@@ -84,6 +102,8 @@ bash vps.sh hy2 status          # 查看端口跳跃状态
 bash vps.sh hy2 uninstall       # 卸载端口跳跃规则
 bash vps.sh 3x-ui install       # 只安装 3x-ui
 bash vps.sh 3x-ui status        # 查看 3x-ui 状态
+bash vps.sh result              # 查看上次部署结果
+bash vps.sh shortcut            # 安装快捷命令 vt
 bash vps.sh tools               # 打开工具箱
 ```
 
