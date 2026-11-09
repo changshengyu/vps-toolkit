@@ -208,7 +208,7 @@ collect_params() {
         elif [ -n "${PARAM_FILE[$var]+x}" ]; then
             value="${PARAM_FILE[$var]}" source="配置文件"
         elif [ -n "${STATE[$var]+x}" ] && [ "$REGEN" != "1" ]; then
-            value="${STATE[$var]}" source="上次生成"
+            value="${STATE[$var]}" source="上次部署"
         fi
 
         # 未启用 AI 分流时跳过 SS 参数
@@ -306,11 +306,14 @@ validate_params() {
     for p in CDN_WS_PATH XHTTP_PATH; do
         [[ "${!p}" =~ ^/[A-Za-z0-9._~/-]*$ ]] || errors+=("$p 必须以 / 开头，且只含字母、数字和 ._~-/：${!p}")
     done
-    [[ "$PANEL_PATH" =~ ^[A-Za-z0-9._~-]+$ ]] || errors+=("PANEL_PATH 只能包含字母、数字和 ._~-：$PANEL_PATH")
-    [[ "$PANEL_USER" =~ ^[A-Za-z0-9._-]+$ ]] || errors+=("PANEL_USER 只能包含字母、数字和 ._-：$PANEL_USER")
+    # 面板已安装时，端口和路径取自现有面板，账号密码不使用
+    if [ "${PANEL_INSTALLED:-0}" != "1" ]; then
+        [[ "$PANEL_PATH" =~ ^[A-Za-z0-9._~-]+$ ]] || errors+=("PANEL_PATH 只能包含字母、数字和 ._~-：$PANEL_PATH")
+        [[ "$PANEL_USER" =~ ^[A-Za-z0-9._-]+$ ]] || errors+=("PANEL_USER 只能包含字母、数字和 ._-：$PANEL_USER")
+        [ "${#PANEL_PASS}" -ge 8 ] || errors+=("PANEL_PASS 至少 8 位")
+    fi
     [[ "$CLIENT_EMAIL" =~ ^[A-Za-z0-9._@-]+$ ]] || errors+=("CLIENT_EMAIL 只能包含字母、数字和 ._@-：$CLIENT_EMAIL")
     [[ "$NODE_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || errors+=("NODE_NAME 只能包含字母、数字和 ._-：$NODE_NAME")
-    [ "${#PANEL_PASS}" -ge 8 ] || errors+=("PANEL_PASS 至少 8 位")
 
     if [ "${#errors[@]}" -gt 0 ]; then
         warn "参数校验未通过："

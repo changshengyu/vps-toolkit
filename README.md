@@ -4,7 +4,7 @@
 
 | 功能 | 说明 |
 |---|---|
-| 一键部署节点 | 在 3x-ui 中生成 hy2、Reality、XHTTP、CDN 四个入站和分流规则（开发中，目前只支持预览） |
+| 一键部署节点 | 安装 3x-ui、申请证书、放行端口，生成 hy2、Reality、XHTTP、CDN 四个入站和分流规则 |
 | Hysteria2 端口跳跃 | 用 nftables 重定向端口，重启后自动恢复 |
 | 3x-ui 面板 | 运行 [3x-ui](https://github.com/MHSanaei/3x-ui) 官方安装脚本 |
 | VPS 多功能工具箱 | 运行 [vps_scripts](https://github.com/everett7623/vps_scripts) |
@@ -13,10 +13,10 @@
 
 ## 快速开始
 
-一键部署节点（目前为预览模式，详见[文档](docs/deploy.md)）：
+一键部署节点（详见[文档](docs/deploy.md)，可先加 `--dry-run` 预览）：
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) deploy --dry-run
+bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) deploy
 ```
 
 打开菜单，以 root 运行：
@@ -36,7 +36,7 @@ bash vps.sh
 ## 命令行用法
 
 ```bash
-bash vps.sh deploy --dry-run  # 预览一键部署生成的配置
+bash vps.sh deploy            # 一键部署节点（加 --dry-run 只预览）
 bash vps.sh hy2 install     # 安装或更新端口跳跃规则
 bash vps.sh hy2 status      # 查看状态
 bash vps.sh hy2 uninstall   # 卸载

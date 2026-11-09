@@ -62,5 +62,7 @@
       udp: [{type: "salamander", settings: {password: $salamander}}]
     }
   },
-  sniffing: $sniffing
+  sniffing: $sniffing,
+  shareAddrStrategy: "custom",
+  shareAddr: $hy2_domain
 }
