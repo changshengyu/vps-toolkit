@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # 个人 VPS 工具集入口
-# 用法：bash vps.sh [hy2|3x-ui|tools|help] [操作]
+# 用法：bash vps.sh [deploy|hy2|3x-ui|tools|help] [操作]
 
 set -euo pipefail
 
-REPO_ARCHIVE="https://github.com/changshengyu/vps-toolkit/archive/refs/heads/main.tar.gz"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ARCHIVE="${VPS_TOOLKIT_ARCHIVE:-https://github.com/changshengyu/vps-toolkit/archive/refs/heads/main.tar.gz}"
+# 通过 curl | bash 运行时没有脚本路径，ROOT_DIR 留空以触发下载完整仓库
+ROOT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 
 # 单独下载 vps.sh 时，先获取完整仓库再运行
 if [ ! -f "$ROOT_DIR/lib/common.sh" ]; then
@@ -21,8 +25,15 @@ if [ ! -f "$ROOT_DIR/lib/common.sh" ]; then
     WORK_DIR="$(mktemp -d)"
     trap 'rm -rf "$WORK_DIR"' EXIT
     curl -fsSL "$REPO_ARCHIVE" | tar -xz -C "$WORK_DIR" --strip-components=1
-    bash "$WORK_DIR/vps.sh" "$@"
-    exit 0
+
+    # 通过 curl | bash 运行时，标准输入是脚本本身，改从终端读取，交互输入才能正常工作
+    rc=0
+    if [ ! -t 0 ] && { : </dev/tty; } 2>/dev/null; then
+        bash "$WORK_DIR/vps.sh" "$@" </dev/tty || rc=$?
+    else
+        bash "$WORK_DIR/vps.sh" "$@" || rc=$?
+    fi
+    exit "$rc"
 fi
 
 # shellcheck source=lib/common.sh
@@ -34,6 +45,7 @@ show_help() {
 
 命令：
   无参数                     打开菜单
+  deploy [选项]              一键部署 3x-ui 节点（--help 查看选项）
   hy2 install|status|uninstall
                              管理 Hysteria2 端口跳跃
   3x-ui install|status       安装 3x-ui 或查看状态
@@ -102,6 +114,26 @@ MENU
     esac
 }
 
+deploy_menu() {
+    local choice
+
+    cat <<MENU
+
+一键部署 3x-ui 节点
+1. 预览配置（不改动系统）
+2. 正式部署
+0. 返回
+MENU
+    read -r -p "请选择: " choice
+
+    case "$choice" in
+        1) bash "$ROOT_DIR/scripts/deploy.sh" --dry-run ;;
+        2) bash "$ROOT_DIR/scripts/deploy.sh" ;;
+        0) ;;
+        *) warn "无效选择。" ;;
+    esac
+}
+
 main_menu() {
     local choice
 
@@ -109,18 +141,20 @@ main_menu() {
         cat <<MENU
 
 VPS 工具集
-1. Hysteria2 端口跳跃
-2. 3x-ui 面板
-3. VPS 多功能工具箱
+1. 一键部署 3x-ui 节点
+2. Hysteria2 端口跳跃
+3. 3x-ui 面板
+4. VPS 多功能工具箱
 0. 退出
 MENU
         read -r -p "请选择: " choice || exit 0
 
         # 子脚本失败时返回菜单，不退出整个工具
         case "$choice" in
-            1) hy2_menu || warn "操作失败。" ;;
-            2) xui_menu || warn "操作失败。" ;;
-            3) bash "$ROOT_DIR/scripts/vps-tools.sh" || warn "工具箱异常退出。" ;;
+            1) deploy_menu || warn "操作失败。" ;;
+            2) hy2_menu || warn "操作失败。" ;;
+            3) xui_menu || warn "操作失败。" ;;
+            4) bash "$ROOT_DIR/scripts/vps-tools.sh" || warn "工具箱异常退出。" ;;
             0) exit 0 ;;
             *) warn "无效选择。" ;;
         esac
@@ -129,6 +163,10 @@ MENU
 
 case "${1:-menu}" in
     menu) main_menu ;;
+    deploy)
+        shift
+        bash "$ROOT_DIR/scripts/deploy.sh" "$@"
+        ;;
     hy2) bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" "${2:-status}" ;;
     3x-ui) bash "$ROOT_DIR/scripts/3x-ui.sh" "${2:-status}" ;;
     tools)
