@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Validate monitoring metadata and unpack only the expected certificate files."""
 import ipaddress
+import hashlib
+import unicodedata
 import gzip
 import io
 import json
@@ -31,11 +33,31 @@ def identity(value):
         return {"kind": "DNS", "address": domain.lower()}
 
 
+def node_name(value):
+    if not isinstance(value, str):
+        raise ValueError("节点名称必须是文字。")
+    if any(unicodedata.category(c).startswith("C") for c in value):
+        raise ValueError("节点名称不能含换行或控制字符。")
+    display = unicodedata.normalize("NFC", value.strip())
+    if (not 1 <= len(display) <= 128 or len(display.encode()) > 512
+            or any(unicodedata.category(c).startswith("C") for c in display)):
+        raise ValueError("节点名称需为 1～128 个可见字符，不能含换行或控制字符。")
+    if display == "client":
+        raise ValueError("client 是客户端证书的保留名称，请换一个名称。")
+    key = display if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}", display) else "node-" + hashlib.sha256(display.encode()).hexdigest()[:24]
+    return {"name": key, "display_name": display}
+
+
 def metadata(value):
-    if set(value) != {"schema", "name", "address", "monitor_ip", "port"} or value["schema"] != 1:
+    required = {"schema", "name", "address", "monitor_ip", "port"}
+    if set(value) not in (required, required | {"display_name"}) or value["schema"] != 1:
         raise ValueError("unsupported certificate package schema")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}", value["name"]):
         raise ValueError("invalid node name")
+    if "display_name" in value:
+        naming = node_name(value["display_name"])
+        if naming["name"] != value["name"] or naming["display_name"] != value["display_name"]:
+            raise ValueError("display name does not match the internal node ID")
     if any("%" in value[k] for k in ("address", "monitor_ip")):
         raise ValueError("scoped IP addresses are not supported")
     address = identity(value["address"])
@@ -99,7 +121,9 @@ def deployment(value):
 
 
 def main(args):
-    if args[0] == "deployment" and len(args) == 2:
+    if args[0] == "name" and len(args) == 2:
+        result = node_name(args[1])
+    elif args[0] == "deployment" and len(args) == 2:
         result = deployment(json.loads(Path(args[1]).read_text()))
     elif args[0] == "resolve" and len(args) == 3:
         address = identity(args[1])["address"]
@@ -114,8 +138,12 @@ def main(args):
     elif args[0] == "validate" and len(args) == 2:
         result = metadata(json.loads(Path(args[1]).read_text()))
     elif args[0] == "create" and len(args) == 5:
-        result = metadata({"schema": 1, "name": args[1], "address": args[2],
-                           "monitor_ip": args[3], "port": int(args[4])})
+        naming = node_name(args[1])
+        value = {"schema": 1, "name": naming["name"], "address": args[2],
+                 "monitor_ip": args[3], "port": int(args[4])}
+        if naming["name"] != naming["display_name"]:
+            value["display_name"] = naming["display_name"]
+        result = metadata(value)
     else:
         raise ValueError("usage: package.py create NAME ADDRESS SOURCE PORT | validate FILE | extract TAR DIR")
     print(json.dumps(result, ensure_ascii=True))

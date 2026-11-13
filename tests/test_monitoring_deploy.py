@@ -49,6 +49,7 @@ class DeploymentTests(TLSFixture):
         return '''
 ensure_pki() { :; }
 install_renew_timer() { printf 'timer installed\\n' >> "$CALL_LOG"; }
+wait_node_scrape() { return 0; }
 activate_https_job() { printf 'job activated\\n' >> "$CALL_LOG"; }
 systemctl() { printf '%s\\n' "$*" >> "$CALL_LOG"; }
 ssh() {
@@ -66,6 +67,21 @@ ssh() {
 }
 probe_https_node() { test -s "$PKI_DIR/nodes/$1/server-key.pem"; return ''' + ("0" if probe else "1") + '''; }
 '''
+
+    def test_failed_scrape_confirmation_keeps_target_renewal_and_legacy_record(self):
+        mocks = self.deployment_mocks()
+        legacy = self.hub / "prometheus/targets/isp-exit.json"
+        legacy.write_text("old target")
+        r = self.shell(mocks + '''
+wait_node_scrape() { return 1; }
+apply_deployment "$DEPLOY_TEST_JSON" interactive
+''', check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("未确认", r.stderr)
+        self.assertTrue((self.hub / "prometheus/https-targets/isp-exit.json").exists())
+        self.assertTrue(json.loads((self.hub / "deploy/isp-exit.json").read_text())["auto_renew"])
+        self.assertEqual(legacy.read_text(), "old target")
+        self.assertIn("timer installed", self.log.read_text())
 
     def test_one_off_deployment_transports_snapshot_and_closes_connection(self):
         self.shell(self.deployment_mocks() + 'apply_deployment "$DEPLOY_TEST_JSON" interactive')

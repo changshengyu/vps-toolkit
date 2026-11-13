@@ -13,7 +13,7 @@ import time
 import uuid
 
 from test_monitoring import ROOT
-from test_monitoring_tls import TLSFixture
+from test_monitoring_tls import TLSFixture, package
 
 
 def docker(*args):
@@ -92,20 +92,24 @@ adduser -S -D -H -G vps-exporter vps-exporter
 printf STREAM_INSTALLED > /tmp/vps-monitor-provisioned
 ''')
         (fixture.hub / "prometheus/https-targets").mkdir()
+        display = "香港/CMI.01"
+        node_key = package.node_name(display)["name"]
+        fixture.env["NODE_KEY"] = node_key
         fixture.env["SSH_INTEGRATION_CONFIG"] = json.dumps({"schema": 1,
-            "node": {"schema": 1, "name": "isp-exit", "address": "127.0.0.1", "monitor_ip": source_ip, "port": 19100},
+            "node": {"schema": 1, "name": node_key, "display_name": display, "address": "127.0.0.1", "monitor_ip": source_ip, "port": 19100},
             "ssh": {"user": "root", "port": port, "identity_file": str(keys / "client")}, "auto_renew": False})
         fixture.shell('''
 chown() { :; }
 ssh() { command ssh -o "UserKnownHostsFile=$TMPDIR/known_hosts" "$@"; }
 build_toolkit_archive() { COPYFILE_DISABLE=1 tar -czf "$1" -C "$TMPDIR/stub" scripts lib; }
 probe_https_node() { return 0; }
+wait_node_scrape() { return 0; }
 activate_https_job() { :; }
 install_renew_timer() { :; }
 apply_deployment "$SSH_INTEGRATION_CONFIG" interactive
 ''')
         assert docker("exec", server, "cat", "/tmp/vps-monitor-provisioned") == "STREAM_INSTALLED"
-        state = json.loads((fixture.hub / "deploy/isp-exit.json").read_text())
+        state = json.loads((fixture.hub / "deploy" / (node_key + ".json")).read_text())
         assert state["auto_renew"] is True
         print("PASS: real SSH ControlMaster transmits the installer/certificate stream and exits", flush=True)
         # The bootstrap credential is deliberately removed. All further work must use the restricted key.
@@ -122,19 +126,19 @@ apply_deployment "$SSH_INTEGRATION_CONFIG" interactive
 chown() { :; }
 ssh() { command ssh -o "UserKnownHostsFile=$TMPDIR/known_hosts" "$@"; }
 probe_https_node() { return 0; }
-renew_managed_node "$DEPLOY_DIR/isp-exit.json"
+renew_managed_node "$DEPLOY_DIR/$NODE_KEY.json"
 ''')
         after = docker("exec", server, "sha256sum", "/etc/vps-toolkit-monitor-node/server.pem").split()[0]
         assert before != after
-        assert after == hashlib.sha256((fixture.pki / "nodes/isp-exit/server.pem").read_bytes()).hexdigest()
+        assert after == hashlib.sha256((fixture.pki / "nodes" / node_key / "server.pem").read_bytes()).hexdigest()
         print("PASS: certificates renew and synchronize without the bootstrap password/key", flush=True)
         result = fixture.shell('''
 chown() { :; }
 ssh() { command ssh -o "UserKnownHostsFile=$TMPDIR/known_hosts" "$@"; }
 mkdir "$TMPDIR/wrong-node"
-jq '.port=19101' "$PKI_DIR/nodes/isp-exit/node.json" > "$TMPDIR/wrong-node/node.json"
-build_node_package isp-exit "$TMPDIR/wrong-node" "$TMPDIR/wrong-node.tar.gz" >/dev/null
-renewal_ssh "$DEPLOY_DIR/isp-exit.json" renew "$TMPDIR/wrong-node.tar.gz"
+jq '.port=19101' "$PKI_DIR/nodes/$NODE_KEY/node.json" > "$TMPDIR/wrong-node/node.json"
+build_node_package "$NODE_KEY" "$TMPDIR/wrong-node" "$TMPDIR/wrong-node.tar.gz" >/dev/null
+renewal_ssh "$DEPLOY_DIR/$NODE_KEY.json" renew "$TMPDIR/wrong-node.tar.gz"
 ''', check=False)
         assert result.returncode != 0
         assert after == docker("exec", server, "sha256sum", "/etc/vps-toolkit-monitor-node/server.pem").split()[0]

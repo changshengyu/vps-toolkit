@@ -201,11 +201,11 @@ node_install() {
 remove_node() {
     linux_root
     require_hub
-    local name
-    read -r -p "要移除的节点名称: " name
-    valid_name "$name" || die "节点名称无效。"
+    local name label
+    read -r -p "要移除的节点名称: " label
+    name="$(node_key "$label")"
     [ -f "$MONITOR_DIR/prometheus/https-targets/$name.json" ] || [ -f "$MONITOR_DIR/prometheus/targets/$name.json" ] || die "没有这个采集目标。"
-    confirm "移除 $name 的采集目标？远端服务、历史和证书保留。" || return 0
+    confirm "移除 ${label} 的采集目标？远端服务、历史和证书保留。" || return 0
     cleanup_legacy_node "$name"
     rm -f "$MONITOR_DIR/prometheus/https-targets/$name.json"
     rm -f "$DEPLOY_DIR/$name.json"
@@ -241,7 +241,7 @@ show_status() {
         local file
         for file in "$MONITOR_DIR"/prometheus/targets/*.json "$MONITOR_DIR"/prometheus/https-targets/*.json; do
             [ -f "$file" ] || continue
-            printf '  %s\n' "$(basename "$file" .json)"
+            printf '  %s [%s]\n' "$(jq -r '.[0].labels.node // "未命名"' "$file")" "$(basename "$file" .json)"
             if [[ "$file" == */https-targets/* ]]; then
                 info "  HTTPS mTLS（实际采集结果请看 Prometheus targets）"
             else
