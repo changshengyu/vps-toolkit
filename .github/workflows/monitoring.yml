@@ -20,6 +20,8 @@ jobs:
           prom/prometheus:v3.16.0 check config /etc/prometheus/prometheus.yml
       - name: HTTPS mTLS with real exporter and Prometheus
         run: python3 tests/monitoring_https_integration.py
+      - name: One-off SSH provisioning with real sshd
+        run: python3 tests/monitoring_ssh_integration.py
       - name: Source IP restriction in isolated network namespace
         run: |
           sudo apt-get update -qq

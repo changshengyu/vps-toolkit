@@ -64,7 +64,9 @@ class MonitoringTests(MonitoringFixture):
                            text=True, capture_output=True, env=self.env, check=True)
         self.assertIn("6. 安装快捷命令 vt", r.stdout)
         self.assertIn("7. 监控管理", r.stdout)
-        self.assertIn("本机作为被监控节点", r.stdout)
+        self.assertIn("1. 安装监控机", r.stdout)
+        self.assertIn("2. 添加 / 部署被监控节点", r.stdout)
+        self.assertIn("3. 查看面板访问方法", r.stdout)
 
     def test_rejects_path_traversal_and_config_injection(self):
         self.shell('''

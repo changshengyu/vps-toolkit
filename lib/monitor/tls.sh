@@ -84,7 +84,7 @@ prepare_node() {
     if [ -z "$name" ]; then read -r -p "节点名称: " name; fi
     valid_name "$name" || die "节点名称无效。"
     [ "$name" != client ] || die "client 是客户端续签保留名称，请换一个节点名称。"
-    read -r -p "节点公网 IP（IPv4 或 IPv6，不含端口）: " address
+    read -r -p "节点直连域名或公网 IP（域名须直连解析，不走 CDN）: " address
     read -r -p "监控机访问该节点时的公网源 IP（同一地址族）: " source_ip
     read -r -p "节点 HTTPS 采集端口 [19100]: " port; port="${port:-19100}"
     valid_port "$port" || die "端口无效。"
@@ -101,15 +101,16 @@ prepare_node() {
 build_node_package() (
     local name="$1"
     valid_name "$name" || die "节点名称无效。"
-    local directory="$PKI_DIR/nodes/$name" address
+    local directory="${2:-$PKI_DIR/nodes/$name}" archive="${3:-$MONITOR_DIR/packages/$name.tar.gz}" address kind
     package_meta validate "$directory/node.json" >/dev/null
     address="$(jq -r .address "$directory/node.json")"
-    sign_leaf "$name" serverAuth "IP:$address" "$directory/server"
+    kind="$(package_meta identity "$address" | jq -r .kind)"
+    sign_leaf "$name" serverAuth "$kind:$address" "$directory/server"
     install -m 644 "$PKI_DIR/ca.pem" "$directory/ca.pem"
-    (umask 077; COPYFILE_DISABLE=1 tar -czf "$MONITOR_DIR/packages/$name.tar.gz.tmp" -C "$directory" node.json ca.pem server.pem server-key.pem)
-    chmod 600 "$MONITOR_DIR/packages/$name.tar.gz.tmp"
-    mv "$MONITOR_DIR/packages/$name.tar.gz.tmp" "$MONITOR_DIR/packages/$name.tar.gz"
-    info "已生成 $MONITOR_DIR/packages/$name.tar.gz（含该节点私钥，请通过现有 SSH/SCP 安全传输）。"
+    (umask 077; COPYFILE_DISABLE=1 tar -czf "$archive.tmp" -C "$directory" node.json ca.pem server.pem server-key.pem)
+    chmod 600 "$archive.tmp"
+    mv "$archive.tmp" "$archive"
+    info "已生成 ${archive}（含该节点私钥，请通过现有 SSH/SCP 安全传输）。"
     info "远端执行：vt monitor node-install --bundle /安全路径/$name.tar.gz"
     openssl x509 -in "$PKI_DIR/ca.pem" -noout -fingerprint -sha256
     info "证书包不含 CA 私钥和监控机客户端私钥；节点安装时请核对上面的 CA 指纹。"
@@ -128,10 +129,12 @@ write_https_target() {
 }
 
 probe_https_node() {
-    local name="$1" address port family target
+    local name="$1" address source_ip port family target
     address="$(jq -r .address "$PKI_DIR/nodes/$name/node.json")"
+    source_ip="$(jq -r .monitor_ip "$PKI_DIR/nodes/$name/node.json")"
     port="$(jq -r .port "$PKI_DIR/nodes/$name/node.json")"
-    if [[ "$address" == *:* ]]; then family=-6; target="[$address]"; else family=-4; target="$address"; fi
+    if [[ "$source_ip" == *:* ]]; then family=-6; else family=-4; fi
+    if [[ "$address" == *:* ]]; then target="[$address]"; else target="$address"; fi
     # --interface is not used: the configured public source may be NATed by the provider.
     curl "$family" --noproxy '*' --connect-timeout 5 --max-time 15 -fsS \
         --cacert "$MONITOR_DIR/prometheus/tls/ca.pem" \
@@ -274,10 +277,15 @@ UNIT
 }
 
 validate_bundle_certificates() {
-    local directory="$1" address
+    local directory="$1" address kind
     address="$(jq -r .address "$directory/node.json")"
     openssl verify -purpose sslserver -CAfile "$directory/ca.pem" "$directory/server.pem" >/dev/null
-    openssl x509 -in "$directory/server.pem" -checkip "$address" -noout >/dev/null
+    kind="$(package_meta identity "$address" | jq -r .kind)"
+    if [ "$kind" = DNS ]; then
+        openssl x509 -in "$directory/server.pem" -checkhost "$address" -noout >/dev/null
+    else
+        openssl x509 -in "$directory/server.pem" -checkip "$address" -noout >/dev/null
+    fi
     openssl x509 -in "$directory/server.pem" -checkend 86400 -noout >/dev/null
     [ "$(openssl x509 -in "$directory/server.pem" -pubkey -noout)" = "$(openssl pkey -in "$directory/server-key.pem" -pubout)" ] || die "节点证书与私钥不匹配。"
 }
@@ -342,7 +350,7 @@ install_node_bundle() (
     systemctl restart "$NODE_SERVICE"
     sleep 2
     systemctl is-active --quiet "$NODE_SERVICE"
-    info "HTTPS mTLS 采集器已启动，仅允许 $(jq -r .monitor_ip "$NODE_CONFIG_DIR/node.json") 访问 TCP $port。"
+    info "HTTPS mTLS 采集器已启动，仅允许 $(jq -r .monitor_ip "$NODE_CONFIG_DIR/node.json") 访问 TCP ${port}。"
     info "已有 UFW/firewalld 或云安全组时，还需精确放行该源 IP 到此端口；请勿向所有 IP 开放。"
     info "确认监控机接入成功后，请安全删除传输用的证书包。"
 )

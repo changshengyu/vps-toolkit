@@ -1,6 +1,6 @@
 # 多 VPS 监控：Prometheus + Grafana + HTTPS mTLS
 
-主菜单 **7 → 监控管理**，或运行 `vt monitor`。仅一台机器安装集中端，其他 VPS 只安装采集器。新节点采用 HTTPS 双向证书认证，日常采集不依赖 SSH 长连接；现有 SSH 目标可逐台迁移。
+主菜单 **7 → 监控管理**，或运行 `vt monitor`。仅一台机器安装集中端，其他 VPS 只安装采集器。推荐在监控机依次选择 **1 安装监控机 → 2 自动添加节点 → 3 查看面板**。填节点域名和 SSH 登录信息后，签发证书、传输、远端安装及接入全部自动完成，无需手工传包。日常采集使用 HTTPS mTLS，部署完成后关闭 SSH 会话。
 
 ## 组件与网络
 
@@ -11,15 +11,15 @@
 | 本地 Mac | 通过 SSH 隧道打开 Grafana；不参与持续采集 |
 
 ```text
-监控机 Prometheus ── HTTPS + 客户端证书 ──→ 节点公网 IP:19100
+监控机 Prometheus ── HTTPS + 客户端证书 ──→ 节点直连域名:19100
 本地 Mac ── SSH 隧道 ──→ 监控机 Grafana
 ```
 
-监控机验证节点证书链和 IP SAN；节点验证客户端证书、clientAuth 用途及监控身份 SAN。节点采集端口仅允许指定的监控机公网源 IP。支持 IPv4 或 IPv6，目标和源 IP 须使用同一地址族；本版直接配置 IP，不依赖公网域名和公共 CA。
+监控机验证节点证书链和 DNS / IP SAN；节点验证客户端证书、clientAuth 用途及监控身份 SAN。节点采集端口仅允许指定的监控机公网源 IP。支持直连域名、IPv4 或 IPv6。域名必须是指向对应 VPS 的 A/AAAA 记录（Cloudflare 灰云），不能使用 CDN 代理或多节点轮询。已有域名可直接使用：工具自动签发专用私有 CA 证书，不改现有网站证书，不需要 ACME 验证，也不需要释放 80/443。源 IP 是监控机的公网出口 IP，不是 Mac 的 IP。
 
 安装要求：Linux + systemd、root、OpenSSL 1.1.1 或更新版本；节点端支持 x86_64 / ARM64。脚本使用 Python 3 标准库验证证书包，无常驻 Python 服务。节点还需要内核支持 nftables；无法安装或应用访问规则时会中止，不会降级成开放采集端口。
 
-不修改 3x-ui、Xray、ISP 分流、现有 SSH 配置或默认路由。采集使用独立端口，不占用 Reality / 静态站点的 443。首次安装 Docker 可能建立 Docker 自身网络规则。
+不修改 3x-ui、Xray、ISP 分流、sshd 配置文件或默认路由；保留原有登录公钥，只新增专用受限续期授权。采集使用独立端口，不占用 Reality / 静态站点的 443。首次安装 Docker 可能建立 Docker 自身网络规则。
 
 ## 1 GB 监控机的试运行限制
 
@@ -35,67 +35,68 @@
 
 496 MiB 是三个集中端容器合计硬上限，不是实际常驻占用，也不包含 Docker、现有代理等。Grafana 的 192 MiB 低于官方最低建议，仅供紧凑试运行，可能 OOM。安装 Docker 后 available 低于 600 MiB 会提示；启动 Prometheus 后不足 300 MiB 时暂不启动 Grafana。
 
-## 安装顺序
+## 推荐部署顺序（只在监控机操作）
 
-### 1. 搬瓦工安装集中端
+### 1. 安装监控机
+
+主菜单 7 → 监控管理 → **1 安装监控机**：
 
 ```bash
 vt monitor hub-install
-vt monitor status
+```
+
+只在一台机器执行。配置保存在 `/opt/vps-toolkit-monitor`，不依赖入口下载的临时目录。重复执行不轮换密码和 CA；其他 VPS 不安装 Prometheus/Grafana。
+
+### 2. 自动添加 / 部署节点
+
+监控管理 → **2 添加 / 部署被监控节点**：
+
+```bash
+vt monitor deploy-node
+```
+
+按提示填节点名称、直连域名或 IP、监控机公网源 IP、采集端口（默认 19100）、SSH 用户和端口，以及监控机上的 SSH 私钥路径（可留空）。源 IP 会尝试自动检测，NAT 或 IPv6 环境请核对。
+
+SSH 私钥路径是**监控机本地**的路径，不是 Mac 路径。留空会尝试默认密钥，也支持由 SSH 自身提示输入密码。密码不经过脚本参数，不会保存。root 可直接安装；非 root 账号需要免密 sudo。
+
+首次连接需核对节点 SSH 指纹；如果使用密码登录，只在此次初始接入时输入一次。随后脚本自动：
+
+1. 签发该节点 DNS/IP SAN 证书。
+2. 将证书和当前工具代码快照通过同一 SSH 会话传入远端。
+3. 远端自动安装 / 更新 Node Exporter、mTLS 及独立源 IP 防火墙规则。
+4. 自动安装专用受限续期公钥，并验证它能独立登录，不依赖首次密码、原密钥或 SSH agent。
+5. 验证 HTTPS 指标请求，校验 Prometheus 配置，再登记采集目标。
+6. 删除传输临时文件并关闭 SSH 连接；后续只通过 HTTPS 采集。
+
+不会把 CA 私钥、客户端私钥或 SSH 私钥传给节点。新增的续期公钥限定监控机源 IP，只能运行固定的证书更新程序，禁止 Shell、端口转发和 PTY。根据信任的 SSH 连接完成证书引导，无需额外手动比对证书包或在两台机器之间切换菜单。
+
+**已有 UFW / firewalld 或云安全组的默认拒绝规则仍然有效。**需要精确放行“监控机源 IP → 节点 TCP 19100”；工具不覆盖其他防火墙策略，也不会忽略 HTTPS 验证失败。接入失败时保留旧采集目标，关闭本次 SSH 会话；如果远端已安装而云安全组未放行，修复后再次执行第 2 项即可。
+
+同一名称再次执行可更新域名、源 IP、SSH 信息，或为重装后的机器重新部署。以后增加新节点只重复第 2 项。
+
+### 3. 查看监控面板
+
+监控管理 → **3 查看面板访问方法**：
+
+```bash
 vt monitor access
 ```
 
-也可用 `bash vps.sh monitor ...`。未安装 vt 时，通过 README 的一行入口传入同样参数。
+按提示在 Mac 建立查看面板的连接。操作完成后用第 4 项检查资源状态，第 5 项查看日志。
 
-配置保存在 `/opt/vps-toolkit-monitor`，不依赖入口脚本临时目录。重复 hub-install 不轮换密码和 CA；启动中断后排查，再用 `vt monitor start` 恢复。
+## 监控菜单顺序
 
-### 2. 生成每台节点的证书包
-
-在监控机运行菜单第 8 项，或：
-
-```bash
-vt monitor prepare-node
+```text
+1. 安装监控机（首次，仅一台）
+2. 添加 / 部署被监控节点（自动流程）
+3. 查看面板访问方法
+4. 查看状态和资源占用
+5. 查看日志
+6. 节点管理 / 手动接入 >
+7. 证书管理 >
+8. 启动 / 停止 / 重启 / 卸载 >
+0. 返回
 ```
-
-输入节点名称、节点公网 IP、监控机访问此节点时的公网源 IP、采集端口（默认 19100）。名称最多 32 字符，用英文字母、数字、下划线或短横线；`client` 是续签保留名。
-
-监控机若使用 NAT，请填写实际公网出口地址，而非系统网卡私网地址。IPv6 请填写实际出站源地址，不要填会变化的临时隐私地址。
-
-生成 `/opt/vps-toolkit-monitor/packages/节点名.tar.gz`，并显示 CA 的 SHA256 指纹。包中只有节点元数据、公开 CA、该节点服务器证书及私钥，**没有 CA 私钥和监控机客户端私钥**。不要把整个 pki 目录传给节点。
-
-### 3. 安全传输并安装节点
-
-通过已有 SSH / SCP 将对应证书包传到该 VPS 的 root 私有目录，例如从监控机执行（替换 SSH 信息）：
-
-```bash
-scp -P SSH端口 /opt/vps-toolkit-monitor/packages/节点名.tar.gz 用户名@节点IP:/安全目录/
-```
-
-远端以 root 执行菜单第 2 项，或：
-
-```bash
-vt monitor node-install --bundle /安全目录/节点名.tar.gz
-```
-
-安装前核对 CA 指纹。脚本只解包预期的四个普通文件，拒绝路径穿越、链接和重复文件，并验证证书链、serverAuth 用途、IP SAN、有效期及密钥匹配。
-
-采集器以非特权用户运行。本模块创建 `vps-toolkit-monitor-firewall.service`，在 exporter 启动前加载独立的 `inet vps_toolkit_monitor` 表，只限制该采集端口，不 flush 现有规则。不支持 nftables 或启动失败时，恢复原采集器配置。
-
-**已有 UFW / firewalld 或云安全组的默认拒绝规则仍然有效。**需要另外精确放行“监控机源 IP → 节点 TCP 19100”，不要对所有来源开放。脚本不覆盖这些已有访问策略。
-
-确认整个连接已接入后，安全删除远端用于传输的证书包；运行所需的证书副本已保存于 `/etc/vps-toolkit-monitor-node`。
-
-### 4. 验证并接入
-
-回到监控机：
-
-```bash
-vt monitor add-node
-```
-
-输入刚才的节点名称。脚本使用真实客户端证书请求远端 HTTPS `/metrics`，验证通过后激活 HTTPS 采集任务。目标通过 file_sd 自动发现，约 30～90 秒后出现。
-
-新建节点也可直接运行 add-node，按提示先生成证书包；在另一终端完成远端安装后，再回到提示处继续。
 
 ## 打开 Grafana
 
@@ -114,11 +115,7 @@ ssh -N -T -p SSH端口 \
 
 ## 从旧 SSH 方案迁移
 
-不需要重装集中端，数据卷、密码和 CA 均保留。对每台旧节点：
-
-1. 在监控机 prepare-node，**使用原来的节点名称**。
-2. 将证书包传到远端，node-install --bundle 把旧的回环 HTTP 采集器迁到 HTTPS 19100。
-3. 在监控机 add-node，仍输入原名称。
+不需要重装集中端，数据卷、密码和 CA 均保留。在监控机选择第 2 项，**使用原来的节点名称**，填写对应域名和 SSH 信息，工具自动安装并迁移。
 
 远端切换监听期间会有短暂采集缺口。只有 HTTPS 验证及 Prometheus 配置校验成功后，才删除旧目标并停用该名称对应的 SSH 隧道；失败会保留旧目标和隧道配置，但远端已切到 HTTPS 时，旧 HTTP 目标暂时无法采集，需修复新连接或恢复旧配置。
 
@@ -126,19 +123,41 @@ ssh -N -T -p SSH端口 \
 
 旧 SSH 专用账号、公钥及 known_hosts 不自动删除。全部迁移完成后，可在远端手动撤销旧授权；新方案不再需要这些监控 SSH 凭据。
 
-## 证书维护
+## 证书维护与自动续签
 
 ```bash
-vt monitor cert-status          # 查看本地签发副本有效期，30 天内到期会提示
-vt monitor cert-renew client    # 续签客户端证书，并重启 Prometheus
-vt monitor cert-renew 节点名    # 生成新的节点证书包
+vt monitor cert-status          # 查看有效期
+vt monitor renew-node           # 一键重新签发并同步远端节点
+vt monitor cert-renew client     # 续签监控机客户端证书
 ```
 
-CA 默认 10 年，服务器和客户端证书默认 1 年；不提供无人值守续签，建议定期检查。节点续签后，必须把新包传过去，再次 node-install --bundle；仅在监控机生成新包不会更新远端。证书状态显示本地签发副本，不代表远端已安装新证书。
+CA 默认 10 年，服务器和客户端证书默认 1 年。成功接入后，安装每日检查的 systemd timer，30 天内到期才续签。运行代码快照保存在监控机持久目录中，不依赖临时下载目录，也不会在后台自动拉取未审阅的新代码。
+
+所有自动接入的节点都会安装独立的 Ed25519 续期公钥；监控机私钥权限为 600，目录为 700。即使首次是密码登录，也不保存密码，后续证书续期不再需要输入密码。每天检查，距到期 30 天时自动签发、同步并验证；客户端证书也会自动续签。
+
+远端续期入口只接收大小受限的证书包，校验原有 CA、节点身份、域名、端口及源 IP 完全一致，只能替换服务器证书和密钥，不能上传或执行安装脚本，不能改变防火墙配置。无法认证或验证时失败退出并记录日志，不会退回密码提示或跳过 SSH 指纹验证。
+
+查看续期任务：`systemctl status vps-toolkit-monitor-renew.timer`；日志：`journalctl -u vps-toolkit-monitor-renew.service --no-pager`。监控机停止监控时会停用 timer；Prometheus 未运行时自动任务也会跳过，不会自行恢复停止的监控。
+
+部署记录仅保存地址、用户名、SSH 端口和密钥路径，不保存密码或私钥内容。专用续期私钥保存在监控机 `/opt/vps-toolkit-monitor/renewal-keys`，请与 CA 一同妥善备份。SSH 指纹发生变化时不会跳过验证，需要手动核对后更新 known_hosts。证书状态显示本地签发副本，不代表手动安装的远端一定已更新。
 
 CA 私钥在 `/opt/vps-toolkit-monitor/pki`（root 私有，未挂载进容器），客户端密钥仅由监控机使用。妥善加密备份这些文件；不要提交到公开仓库。CA 文件不完整时停止，不会静默生成另一套 CA。CA 泄露或到期需要重新规划全部节点信任迁移，不属于普通叶证书续签。
 
-监控机源 IP 改变时：在 prepare-node 中填写原节点名称，确认更新地址/源 IP 并生成新包；远端重新安装以更新源 IP 限制，然后 add-node 验证连接；重装节点仍可重新安装同一套未过期证书包。证书包包含私钥，泄露后需按影响范围更换证书/信任。
+监控机源 IP 改变时：重新选择第 2 项，填写原节点名称并更新源 IP，工具自动重新部署并验证；重装节点仍可重新安装同一套未过期证书包。证书包包含私钥，泄露后需按影响范围更换证书/信任。
+
+## 高级：不授予 SSH 安装权限时手动接入
+
+位于“6 节点管理 / 手动接入”，保留原来的 prepare-node、node-install、add-node 命令。手动流程仍可生成证书包、自行安全传输、在远端核对 CA 指纹安装，再在监控机验证接入。普通使用无需进入此流程。
+
+```bash
+vt monitor prepare-node
+# 将生成的节点证书包安全传到对应远端后执行：
+vt monitor node-install --bundle /安全目录/节点名.tar.gz
+# 回到监控机验证：
+vt monitor add-node
+```
+
+节点安装校验证书链、用途、DNS/IP SAN、有效期及密钥匹配，拒绝路径穿越和链接；默认使用独立 `inet vps_toolkit_monitor` 表限制指定源 IP。手动安装的节点证书需要手动传包续签，或用 deploy-node 转为自动管理。
 
 ## 日常管理与停止
 
@@ -152,7 +171,7 @@ vt monitor remove-node
 vt monitor uninstall
 ```
 
-集中端卸载只执行 docker compose down，不删数据卷、配置和证书。节点卸载先停止采集器，再移除本模块防火墙服务与规则，保留证书和二进制；原有 UFW、firewalld 和云安全组规则不动。remove-node 仅停止采集，不撤销证书，远端不再使用时应在那里卸载。
+集中端卸载会停用并移除续期 timer，执行 docker compose down，不删数据卷、配置、证书和部署记录。节点卸载先停止采集器、撤销本工具的续期公钥，再移除本模块防火墙服务与规则，保留证书和二进制；原有 UFW、firewalld 和云安全组规则不动。remove-node 停止采集并删除自动续期记录，不撤销证书，远端不再使用时应在那里卸载。
 
 初期逐台接入约 3～5 台，观察 24～48 小时。available 持续低于约 150 MiB、Swap 持续换入换出、容器重启或代理体验变差时，先只停 Grafana：
 
@@ -165,7 +184,7 @@ VPS 关机或网络断开期间仍然无法采集，Node Exporter 不补传历�
 
 ## 验证与资料
 
-离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
+离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
 
 - [Node Exporter](https://github.com/prometheus/node_exporter)
 - [Exporter Toolkit TLS 配置](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md)

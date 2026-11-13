@@ -275,41 +275,92 @@ hy2_menu() {
     done
 }
 
+monitor_nodes_menu() {
+    while true; do
+        menu_items "节点管理 / 手动接入" \
+            "添加或重新部署节点（自动流程）" \
+            "移除节点采集" \
+            "本机手动安装采集器（需证书包）" \
+            "手动生成节点证书包" \
+            "验证并接入已安装的节点"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 5
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" remove-node ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" node-install ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" prepare-node ;;
+            5) run bash "$ROOT_DIR/scripts/monitor.sh" add-node ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+monitor_certs_menu() {
+    while true; do
+        menu_items "证书管理" \
+            "查看有效期" \
+            "续签并同步远端节点证书" \
+            "续签监控机客户端证书" \
+            "只生成手动安装包（高级）"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 4
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" cert-status ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" renew-node ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew client ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+monitor_services_menu() {
+    while true; do
+        menu_items "监控服务管理（本机）" \
+            "启动" "停止" "重启" "卸载服务（保留数据）"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 4
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" start ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" stop ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" restart ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" uninstall ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 monitor_menu() {
     while true; do
         menu_header
+        printf '  首次部署：在监控机依次选择 1 → 2 → 3；以后添加节点只需选 2。\n'
         menu_items "监控管理（Prometheus + Grafana）" \
-            "本机作为监控机：安装完整套件" \
-            "本机作为被监控节点：只安装采集器" \
-            "验证并接入 HTTPS 节点 / 迁移旧 SSH 节点" \
-            "移除远端节点（在监控机操作）" \
+            "安装监控机（首次，仅一台）" \
+            "添加 / 部署被监控节点（自动流程）" \
+            "查看面板访问方法" \
             "查看状态和资源占用" \
             "查看日志" \
-            "查看面板访问方法" \
-            "生成节点 HTTPS 证书包（在监控机操作）" \
-            "启动监控服务" \
-            "停止监控服务" \
-            "重启监控服务" \
-            "卸载监控服务（保留数据）" \
-            "查看证书有效期" \
-            "续签客户端或节点证书"
+            "节点管理 / 手动接入 >" \
+            "证书管理 >" \
+            "启动 / 停止 / 重启 / 卸载 >"
         printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
-        read_choice 14
+        read_choice 8
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" node-install ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" add-node ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" remove-node ;;
-            5) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
-            6) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
-            7) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
-            8) run bash "$ROOT_DIR/scripts/monitor.sh" prepare-node ;;
-            9) run bash "$ROOT_DIR/scripts/monitor.sh" start ;;
-            10) run bash "$ROOT_DIR/scripts/monitor.sh" stop ;;
-            11) run bash "$ROOT_DIR/scripts/monitor.sh" restart ;;
-            12) run bash "$ROOT_DIR/scripts/monitor.sh" uninstall ;;
-            13) run bash "$ROOT_DIR/scripts/monitor.sh" cert-status ;;
-            14) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
+            5) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
+            6) monitor_nodes_menu; continue ;;
+            7) monitor_certs_menu; continue ;;
+            8) monitor_services_menu; continue ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac

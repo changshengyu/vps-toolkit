@@ -17,24 +17,32 @@ TUNNEL_UNIT=vps-toolkit-monitor-tunnel@
 
 # shellcheck source=../lib/monitor/tls.sh
 . "$ROOT_DIR/lib/monitor/tls.sh"
+# shellcheck source=../lib/monitor/deploy.sh
+. "$ROOT_DIR/lib/monitor/deploy.sh"
+# shellcheck source=../lib/monitor/renew.sh
+. "$ROOT_DIR/lib/monitor/renew.sh"
 
 show_help() {
     cat <<'HELP'
 用法：vt monitor 操作 [参数]
-  hub-install                    本机安装 Prometheus + Grafana + Node Exporter
-  node-install [--bundle FILE]    安装节点 HTTPS mTLS 采集器（必须提供证书包）
-  prepare-node                   生成远端节点证书安装包
-  add-node                       验证 HTTPS 后接入节点，成功后迁移旧 SSH 目标
-  remove-node                    在监控机移除远端采集（保留远端采集器）
-  cert-status                    查看 CA、客户端和节点证书有效期
-  cert-renew [client|节点名]      续签客户端证书或重新生成节点证书包
-  access                         显示 Mac 访问方法及密码文件位置
-  status                         查看本机监控状态和资源
-  logs                           查看本机监控日志
+推荐顺序：在监控机执行 hub-install → deploy-node → access
+  hub-install                    安装监控机（仅一台）
+  deploy-node                    填域名和 SSH 信息，自动安装并接入节点
+  access                         查看面板访问方法
+  status|logs                    查看本机状态或日志
+  renew-node                     无密码续签并同步远端证书
+  cert-status                    查看证书有效期
   start|stop|restart             管理本机监控服务
-  uninstall                      卸载本机监控服务，保留历史、密码和证书
+  uninstall                      卸载服务，保留历史；节点续期公钥会撤销
   help                           显示帮助
-集中监控端需要 Docker Compose v2；节点端仅使用二进制和 systemd。
+高级手动接入：
+  prepare-node                   手动生成证书包
+  node-install --bundle FILE     在远端手动安装证书包
+  add-node                       验证已安装的节点并登记目标
+  remove-node                    移除采集与自动续期记录
+  cert-renew [client|节点名]      续签客户端证书或只生成节点安装包
+集中端需要 Docker Compose v2；节点端仅运行 Node Exporter。
+自动部署后配置受限续期密钥，节点和客户端证书到期前自动更新。
 HELP
 }
 
@@ -183,6 +191,7 @@ remove_node() {
     confirm "移除 $name 的采集目标？远端服务、历史和证书保留。" || return 0
     cleanup_legacy_node "$name"
     rm -f "$MONITOR_DIR/prometheus/https-targets/$name.json"
+    rm -f "$DEPLOY_DIR/$name.json"
     info "已移除；远端若不再使用，请在那里卸载采集器。"
 }
 
@@ -230,6 +239,11 @@ manage() {
             stop) compose stop ;;
             restart) compose up -d; compose restart ;;
         esac
+        if [ "$action" = stop ]; then
+            if [ -f "$SYSTEMD_DIR/$RENEW_SERVICE.timer" ]; then systemctl disable --now "$RENEW_SERVICE.timer"; fi
+        elif compgen -G "$DEPLOY_DIR/*.json" >/dev/null; then
+            install_renew_timer
+        fi
         for file in "$SSH_DIR"/config.d/*; do
             [ -f "$file" ] || continue
             systemctl "$action" "${TUNNEL_UNIT}$(basename "$file")"
@@ -254,9 +268,14 @@ show_logs() {
 
 uninstall() {
     linux_root
-    confirm "移除本工具的监控服务？配置、密码、历史数据和 SSH 授权将保留。" || return 0
+    confirm "移除本工具的监控服务？保留配置、密码和历史；节点专用续期授权会撤销。" || return 0
     local file
     if hub_installed; then
+        if [ -f "$SYSTEMD_DIR/$RENEW_SERVICE.timer" ]; then
+            systemctl disable --now "$RENEW_SERVICE.timer"
+            rm -f "$SYSTEMD_DIR/$RENEW_SERVICE.timer" "$SYSTEMD_DIR/$RENEW_SERVICE.service"
+            systemctl daemon-reload
+        fi
         compose down
         for file in "$SSH_DIR"/config.d/*; do
             [ -f "$file" ] || continue
@@ -265,6 +284,7 @@ uninstall() {
         info "容器已移除，Docker 数据卷和 $MONITOR_DIR 均保留，start 可恢复。"
     elif node_installed; then
         systemctl disable --now "$NODE_SERVICE"
+        revoke_renewal_key
         if [ -f "$NODE_CONFIG_DIR/.vps-toolkit-managed" ]; then
             systemctl disable --now "$FIREWALL_SERVICE"
             rm -f "$SYSTEMD_DIR/$FIREWALL_SERVICE.service"
@@ -283,6 +303,19 @@ main() {
     case "${1:-help}" in
         hub-install) hub_install ;;
         node-install) shift; node_install "$@" ;;
+        deploy-node) monitor_lock deploy_node ;;
+        renew-node) monitor_lock renew_node ;;
+        renew-due) monitor_lock renew_due ;;
+        renew-saved)
+            linux_root
+            require_hub
+            [ "$#" -eq 2 ] || die "缺少部署记录。"
+            renew_managed_node "$2"
+            ;;
+        renewal-authorize)
+            [ "$#" -eq 3 ] || die "缺少续期授权参数。"
+            authorize_renewal_key "$2" "$3"
+            ;;
         prepare-node) prepare_node ;;
         add-node) add_https_node ;;
         remove-node) remove_node ;;
@@ -299,4 +332,8 @@ main() {
     esac
 }
 
+if [ "${MONITOR_INSTALL_NONINTERACTIVE:-0}" = 1 ] && [ "${1:-}" = node-install ]; then
+    # Only the explicit node installer may skip confirmation after authenticated SSH provisioning.
+    confirm() { return 0; }
+fi
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

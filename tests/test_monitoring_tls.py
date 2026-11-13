@@ -1,6 +1,7 @@
 """Certificate, migration and firewall regressions without changing the host."""
 import importlib.util
 import io
+import gzip
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,15 @@ spec.loader.exec_module(package)
 
 
 class PackageTests(unittest.TestCase):
+    def test_compressed_package_has_a_decoded_size_limit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)
+            archive = path / "large.tar.gz"
+            archive.write_bytes(gzip.compress(b"\0" * 2097152))
+            with self.assertRaises(ValueError):
+                package.extract(archive, path / "unpacked")
+            self.assertFalse((path / "unpacked").exists())
+
     def test_ipv4_and_ipv6_metadata(self):
         for address, source in [("192.0.2.10", "192.0.2.20"), ("2001:db8::10", "2001:db8::20")]:
             value = package.metadata({"schema": 1, "name": "isp-exit", "address": address,
@@ -54,7 +64,7 @@ class PackageTests(unittest.TestCase):
                 self.assertFalse((path / "unpacked").exists())
 
 
-class TLSTests(MonitoringFixture):
+class TLSFixture(MonitoringFixture):
     def setUp(self):
         super().setUp()
         self.pki = self.hub / "pki"
@@ -78,6 +88,8 @@ build_node_package isp-exit
 ''')
         return self.hub / "packages/isp-exit.tar.gz"
 
+
+class TLSTests(TLSFixture):
     def test_certificate_roles_san_and_bundle_separation(self):
         bundle = self.make_certificates()
         data = self.path / "unpacked"
