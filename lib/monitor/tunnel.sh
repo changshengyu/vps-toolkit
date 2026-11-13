@@ -21,7 +21,7 @@ cf_read_token() {
 cf_wait_ready() {
     local attempt
     for attempt in {1..30}; do
-        if curl -fsS --max-time 2 http://127.0.0.1:20245/ready >/dev/null 2>&1; then return 0; fi
+        if curl --noproxy '*' -fsS --max-time 2 http://127.0.0.1:20245/ready >/dev/null 2>&1; then return 0; fi
         sleep 2
     done
     warn "Tunnel 未就绪。请检查出站 TCP/UDP 7844；初次配置失败会回滚，恢复失败可再次 tunnel-start。"
@@ -82,6 +82,7 @@ tunnel_setup() (
     compose pull grafana-tunnel
     compose up -d --no-deps grafana grafana-tunnel
     cf_wait_ready
+    grafana_wait
     cf_complete=1
     show_access
     info "Cloudflare 托管入口 HTTPS 证书并自动续签；无需在 VPS 安装入口证书。"
@@ -100,6 +101,7 @@ tunnel_start() (
     compose config --quiet
     compose up -d --no-deps grafana grafana-tunnel
     cf_wait_ready
+    grafana_wait
     cf_complete=1
     show_access
 )
@@ -132,12 +134,15 @@ tunnel_status() {
     require_hub
     if [ ! -f "$CF_DIR/state.json" ]; then info "尚未配置 Cloudflare Tunnel。"; return 0; fi
     cloudflare status "$CF_DIR"
+    local failed=0
+    if ! grafana_ready; then warn "Grafana 本机接口未就绪，入口可能 502；请运行 grafana-check。"; failed=1; else info "Grafana 本机接口：就绪。"; fi
     if [ -f "$CF_OVERLAY" ]; then
         compose ps grafana-tunnel
-        curl -fsS --max-time 3 http://127.0.0.1:20245/ready || warn "Tunnel 尚未连接。"
+        curl --noproxy '*' -fsS --max-time 3 http://127.0.0.1:20245/ready || { warn "Tunnel 尚未连接。"; failed=1; }
     else
         info "状态：已暂停或创建未完成，可恢复或移除。"
     fi
+    return "$failed"
 }
 
 tunnel_logs() {

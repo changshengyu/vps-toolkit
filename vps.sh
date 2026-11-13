@@ -347,9 +347,11 @@ monitor_access_menu() {
             "查看域名入口日志" \
             "暂停域名入口，恢复 SSH 访问" \
             "恢复域名入口" \
-            "移除域名入口（保留监控数据）"
+            "移除域名入口（保留监控数据）" \
+            "修改 Grafana 登录账号 / 密码" \
+            "调整 Grafana 资源 / 修复启动"
         printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
-        read_choice 7
+        read_choice 9
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-setup ;;
             2) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
@@ -358,6 +360,8 @@ monitor_access_menu() {
             5) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-stop ;;
             6) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-start ;;
             7) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-remove ;;
+            8) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-account ;;
+            9) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-resources ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac

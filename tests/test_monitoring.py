@@ -150,7 +150,7 @@ download_node amd64
             capture_output=True, text=True, check=True,
         )
         services = json.loads(result.stdout)["services"]
-        self.assertEqual(sum(int(s["mem_limit"]) for s in services.values()), 496 * 1024**2)
+        self.assertEqual(sum(int(s["mem_limit"]) for s in services.values()), 560 * 1024**2)
         for service in services.values():
             self.assertEqual(service["network_mode"], "host")
             self.assertFalse(service.get("ports"))

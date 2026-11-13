@@ -113,6 +113,9 @@ bash vps.sh monitor hub-install # 仅在一台监控机安装 Prometheus + Grafa
 bash vps.sh monitor deploy-node # 填节点域名和 SSH 信息，自动安装并接入
 bash vps.sh monitor tunnel-setup # 第 3 步：自动配置 Grafana HTTPS 域名入口
 bash vps.sh monitor access      # 查看域名地址或备用 SSH 访问方法
+bash vps.sh monitor grafana-account # 修改 Grafana 实际登录账号 / 密码
+bash vps.sh monitor grafana-check # 检查本机面板就绪、重启及资源
+bash vps.sh monitor grafana-resources # 持久调整资源，迁移旧 192 MiB 配置
 bash vps.sh monitor renew-node  # 一键续签并同步，无需手工传证书包
 bash vps.sh monitor cert-status # 查看证书有效期
 bash vps.sh monitor help        # 查看全部监控操作

@@ -23,6 +23,8 @@ TUNNEL_UNIT=vps-toolkit-monitor-tunnel@
 . "$ROOT_DIR/lib/monitor/renew.sh"
 # shellcheck source=../lib/monitor/tunnel.sh
 . "$ROOT_DIR/lib/monitor/tunnel.sh"
+# shellcheck source=../lib/monitor/grafana.sh
+. "$ROOT_DIR/lib/monitor/grafana.sh"
 
 show_help() {
     cat <<'HELP'
@@ -31,6 +33,9 @@ show_help() {
   hub-install                    安装监控机（仅一台）
   deploy-node                    填域名和 SSH 信息，自动安装并接入节点
   access                         查看面板访问方法
+  grafana-account                修改 Grafana 用户名 / 密码
+  grafana-check                  检查 Grafana 本机接口和重启 / 资源
+  grafana-resources              持久调整 Grafana 内存并验证启动
   tunnel-setup                   自动配置 Cloudflare Tunnel 域名入口
   tunnel-status|tunnel-logs      查看入口连接状态或日志
   tunnel-stop|tunnel-start      暂停 / 恢复域名入口
@@ -70,6 +75,7 @@ node_installed() { [ -f "$NODE_DIR/.vps-toolkit-managed" ]; }
 require_hub() { hub_installed || die "请先在本机安装监控机。"; }
 compose() {
     local files=(-f "$MONITOR_DIR/compose.yaml")
+    if [ -f "$MONITOR_DIR/compose.grafana.yaml" ]; then files+=(-f "$MONITOR_DIR/compose.grafana.yaml"); fi
     if [ -f "$MONITOR_DIR/compose.tunnel.yaml" ]; then files+=(-f "$MONITOR_DIR/compose.tunnel.yaml"); fi
     docker compose --project-directory "$MONITOR_DIR" "${files[@]}" "$@"
 }
@@ -104,7 +110,7 @@ hub_install() {
     [ ! -e "$MONITOR_DIR" ] || die "$MONITOR_DIR 已存在且不属于本模块，未覆盖。"
     check_ports 3000 9090 9100
     info "计划：本机部署 3 个容器，60 秒采集、7 天历史、历史块上限 2 GB。"
-    info "内存上限合计 496 MiB，不含 Docker 等开销；Grafana 192 MiB 为紧凑试运行值，可能 OOM。"
+    info "内存上限合计 560 MiB，不含 Docker 等开销；Grafana 256 MiB 为紧凑试运行值，可能 OOM。"
     info "仅监听本机地址，通过 SSH 访问，不改 3x-ui 和 Xray 配置；首次安装 Docker 可能建立 Docker 自身的网络规则。"
     confirm "确认安装监控机？" || return 0
     ensure_packages curl openssl jq python3
@@ -141,6 +147,7 @@ hub_install() {
         return 1
     fi
     compose up -d grafana
+    grafana_wait
     info "监控机已启动。VPS overview 仪表盘和 Prometheus 数据源已配置。"
     show_access
 }
@@ -207,20 +214,22 @@ remove_node() {
 
 show_access() {
     require_hub
-    local grafana_access="Grafana：http://127.0.0.1:13000 （admin）"
+    local grafana_access="Grafana：http://127.0.0.1:13000"
+    info "Grafana 登录用户名：$(grafana_meta account "$MONITOR_DIR")"
     if [ -f "$CF_OVERLAY" ]; then
         cloudflare status "$CF_DIR"
-        info "Grafana 用户名：admin；初始密码在 $MONITOR_DIR/.env。已有数据库密码不变。"
-        info "HTTPS 安全 Cookie 已启用。要用 SSH HTTP 登录 Grafana，请先运行 vt monitor tunnel-stop。"
-        grafana_access="Grafana：使用上方 HTTPS 域名；暂停域名入口后可用 http://127.0.0.1:13000。"
+        info "HTTPS 安全 Cookie 已启用；使用 SSH HTTP 登录前运行 vt monitor tunnel-stop。"
+        grafana_access="Grafana：使用上方 HTTPS 域名；暂停入口后可用 http://127.0.0.1:13000。"
     fi
+    if grafana_ready; then info "Grafana 本机接口：就绪。"; else warn "Grafana 本机接口未就绪，域名可能返回 502；请运行 vt monitor grafana-check。"; fi
     cat <<ACCESS
 在 Mac 终端运行（替换用户名、IP 和 SSH 端口）：
 ssh -N -T -p SSH端口 -L 127.0.0.1:13000:127.0.0.1:3000 -L 127.0.0.1:19090:127.0.0.1:9090 用户名@监控机IP
 $grafana_access
 Prometheus：http://127.0.0.1:19090/targets
-Grafana 初始密码保存在 $MONITOR_DIR/.env，仅在自己的终端查看。
-Mac 断开不影响采集；修改 .env 不会重置已有 Grafana 数据库的密码。
+修改登录信息：vt monitor grafana-account（面板访问菜单第 8 项）。
+安装时初始密码在 $MONITOR_DIR/.env；修改 .env 不会重置已有数据库密码。
+Mac 断开不影响采集。
 ACCESS
 }
 
@@ -341,6 +350,9 @@ main() {
         cert-status) cert_status ;;
         cert-renew) shift; cert_renew "${1:-}" ;;
         access) show_access ;;
+        grafana-account) monitor_lock grafana_account ;;
+        grafana-resources) monitor_lock grafana_resources ;;
+        grafana-check) grafana_check ;;
         tunnel-setup) monitor_lock tunnel_setup ;;
         tunnel-start) monitor_lock tunnel_start ;;
         tunnel-stop) monitor_lock tunnel_stop ;;

@@ -29,12 +29,12 @@
 | 采集间隔 / 历史 | 60 秒 / 7 天 |
 | 历史块保留上限 | 2 GB；WAL、当前块及压缩临时文件需另外留空间 |
 | 磁盘检查 | /opt 至少 5 GiB 可用 |
-| 集中端容器内存上限 | Prometheus 256 MiB、Grafana 192 MiB、Node Exporter 48 MiB |
+| 集中端容器内存上限 | Prometheus 256 MiB、Grafana 256 MiB、Node Exporter 48 MiB |
 | 远端采集器内存上限 | systemd MemoryMax=64M |
 | 集中端管理端口 | 仅 127.0.0.1:3000、9090、9100 |
 | 远端 HTTPS 采集端口 | 默认 TCP 19100，仅指定源 IP + 客户端证书可访问 |
 
-496 MiB 是三个集中端容器合计硬上限，不是实际常驻占用，也不包含 Docker、现有代理等。Grafana 的 192 MiB 低于官方最低建议，仅供紧凑试运行，可能 OOM。安装 Docker 后 available 低于 600 MiB 会提示；启动 Prometheus 后不足 300 MiB 时暂不启动 Grafana。
+560 MiB 是三个集中端容器合计硬上限，不是实际常驻占用，也不包含 Docker、现有代理等。Grafana 的 256 MiB 低于官方最低建议，仅供紧凑试运行，可能 OOM。安装 Docker 后 available 低于 600 MiB 会提示；启动 Prometheus 后不足 300 MiB 时暂不启动 Grafana。
 
 ## 推荐部署顺序（只在监控机操作）
 
@@ -114,7 +114,7 @@ Cloudflare 自动签发和续签浏览器入口 HTTPS 证书；VPS 不需要 ACM
 
 API Token 临时保存为 root 私有文件，操作结束删除，不进入命令参数、环境变量或 Compose。运行时仅保留该 Tunnel 的连接 Token，文件权限 0400、挂载只读，容器以 UID 65532 运行。`tunnel/` 目录权限 0700，包含资源归属记录，勿公开或删除；移除入口时会再次要求 API Token，日常运行、重启和 Cloudflare 证书续签不要求密码或 API Token。
 
-新增 cloudflared 容器内存硬上限 96 MiB（不是实际占用承诺），CPU 上限 0.20 核；四个监控容器内存上限合计 592 MiB，不含 Docker 和代理。配置时要求 MemAvailable 至少 160 MiB。运行状态和日志可在菜单查看；断网 / 重启后容器自动重连。此入口仍需 Grafana 登录；如需仅本人可达，可在 Cloudflare 控制台额外配置 Access 应用和访问策略，本模块不会自动创建 Access 策略。
+新增 cloudflared 容器内存硬上限 96 MiB（不是实际占用承诺），CPU 上限 0.20 核；四个监控容器内存上限合计 656 MiB，不含 Docker 和代理。配置时要求 MemAvailable 至少 160 MiB。运行状态和日志可在菜单查看；断网 / 重启后容器自动重连。此入口仍需 Grafana 登录；如需仅本人可达，可在 Cloudflare 控制台额外配置 Access 应用和访问策略，本模块不会自动创建 Access 策略。
 
 ```text
 面板访问子菜单（7 → 3）
@@ -125,6 +125,8 @@ API Token 临时保存为 root 私有文件，操作结束删除，不进入命�
 5. 暂停域名入口，恢复 SSH 访问
 6. 恢复域名入口
 7. 移除域名入口（保留监控数据）
+8. 修改 Grafana 登录账号 / 密码
+9. 调整 Grafana 资源 / 修复启动
 ```
 
 ```bash
@@ -139,6 +141,32 @@ vt monitor tunnel-remove    # 再次输入 API Token，删除本工具的 CNAME 
 域名模式启用 Grafana HTTPS 根地址和 Secure Cookie。需要通过下面的 SSH HTTP 地址登录时，先运行 `tunnel-stop`；Prometheus 的 SSH 访问不受影响。配置 / 暂停会重建 Grafana 容器，有短暂面板中断，不删除数据卷、不重启 Prometheus、不改变采集、3x-ui 或 Xray。
 
 创建失败时自动停止本次入口并尝试清理本次新建的云端资源；API 不可达或 Tunnel 仍显示在线时保留归属记录，可稍后 `tunnel-remove` 重试。清理只处理本工具记录的 Tunnel 及仍指向它的 CNAME，不删除后来改成其他目标的 DNS；Tunnel 被手工改名时停止删除并要求检查。不要在配置过程中手工删除本地 `tunnel/state.json`。集中端 `stop/uninstall` 停止连接器但保留云端记录和配置；彻底删除入口需要单独 `tunnel-remove`，Grafana / Prometheus 历史均保留。
+
+### Grafana 登录信息与 502 排查
+
+面板访问菜单 **8 修改 Grafana 登录账号 / 密码**，或 `vt monitor grafana-account`。输入当前用户名、当前密码、新用户名及新密码；用户名或新密码留空表示保留，修改密码时需要再次确认。当前密码留空时只尝试安装时生成的初始密码；已在网页改过密码时需要输入当前密码。新密码至少 12 个字符、最多 128 字节。
+
+脚本调用 Grafana **本机** User API 修改已有管理员，并验证新凭据，不靠修改 `.env` 重置数据库。密码通过 stdin 传给 Python，只在进程内用于本机认证，不作为命令参数、环境变量或账户记录保存。`grafana-account.json` 只保存用户名、用户 ID、初始密码是否已失效；修改后“查看面板地址”显示记录的用户名并提示使用当前密码。若用户名步骤成功、密码步骤失败，会保留新用户名记录并明确提示当前状态；修改前检查用户名冲突。
+
+Cloudflare Tunnel 的 502 常见于 `cloudflared` 已连接，但 Grafana 未接受本机连接。**不用对公网开放 3000**：本模块两个容器都使用宿主机网络，转发目标是 `http://127.0.0.1:3000`。排查时先运行：
+
+```bash
+vt monitor grafana-check
+vt monitor tunnel-status
+```
+
+这会检查本机 HTTP 接口、容器重启次数、最近 OOM 标志和资源上限；`OOM=false` 不足以排除之前发生过内存压力。Tunnel 的连接就绪与 Grafana 就绪分别检查，只有两者通过才报告入口设置完成。初次重建 Grafana 后会等待约 4 分钟，再按失败流程清理或提示。
+
+旧安装的 Grafana 上限为 192 MiB，曾在实际 VPS / amd64 测试中出现启动重启。新版新安装改为 **256 MiB、0.5 CPU**；已有安装保留原配置，可选择 **9 调整 Grafana 资源 / 修复启动**，或执行：
+
+```bash
+vt monitor grafana-resources
+# 默认 256 MiB，也可选 320 / 384 / 512。
+```
+
+操作前检查当前 MemAvailable，至少留出“上限增加量 + 96 MiB”的余量，再确认应用。只重建 Grafana，等待本机接口就绪，不停止 Prometheus 或修改代理。配置写入独立 `compose.grafana.yaml`，后续主菜单启动、域名暂停 / 恢复都继续加载，账号和数据卷保留。已存在的非本工具同名配置拒绝覆盖。
+
+256 MiB 仍是低配试运行值，不能保证所有负载下稳定；资源不足时先减少负载或分离面板，不自动提高上限。若本机接口已正常而仍 502，再检查 Tunnel 日志中的 origin 地址和错误，不通过开放公网端口处理。
 
 ### Token 输入后看似卡住时
 
@@ -241,7 +269,7 @@ VPS 关机或网络断开期间仍然无法采集，Node Exporter 不补传历�
 
 ## 验证与资料
 
-离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。Tunnel 回归使用模拟 API 验证 DNS 冲突、失败回滚、断网重试及凭据隐藏；`python3 tests/monitoring_tunnel_integration.py` 使用真实 cloudflared CLI 和 Grafana 容器验证 Compose 合并、HTTPS 根地址 / Cookie、暂停后的 SSH 登录和密码保留，不使用真实 Cloudflare 账户。该功能集成测试容器单独使用 256 MiB / 1 CPU 以覆盖首次初始化开销，不代表 192 MiB 紧凑试运行参数的容量保证；低配机器仍需观察内存和重启情况。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
+离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。Tunnel 回归使用模拟 API 验证 DNS 冲突、失败回滚、断网重试及凭据隐藏；`python3 tests/monitoring_tunnel_integration.py` 使用真实 cloudflared CLI 和 Grafana 容器验证 Compose 合并、HTTPS 根地址 / Cookie、暂停后的 SSH 登录和密码保留，不使用真实 Cloudflare 账户。该功能集成测试使用与生产相同的 256 MiB / 0.5 CPU 上限，验证真实账户改名 / 改密、旧密码拒绝、新凭据在域名暂停后保留，以及持久资源覆盖；低配机器仍需观察内存和重启情况。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
 
 - [Node Exporter](https://github.com/prometheus/node_exporter)
 - [Exporter Toolkit TLS 配置](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md)
