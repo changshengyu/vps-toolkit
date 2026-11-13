@@ -74,9 +74,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 ├─ 4. 系统设置（IPv6）>    查看状态 / 开启 / 关闭
 ├─ 5. VPS 多功能工具箱
 ├─ 6. 安装快捷命令 vt
-├─ 7. 监控管理 >          监控机安装 / 节点采集器 / 接入与移除节点 / 状态与日志 / 启停 / 卸载
+├─ 7. 监控管理 >          按顺序：1 安装监控机 → 2 自动添加节点 → 3 查看面板
 └─ 0. 退出
 ```
+
+监控管理按实际顺序排列：在监控机依次选择 **1 安装 → 2 自动添加节点 → 3 查看面板**。已有直连域名可直接使用；首次 SSH 认证后自动配置受限续期密钥，后续证书自动续签同步，无需再次输入密码或手工传包。
 
 选 6 安装快捷命令后，以后直接输入 `vt` 打开菜单（每次运行仓库最新版），也可以带参数，如 `vt deploy --config-only`。
 
@@ -108,9 +110,9 @@ bash vps.sh shortcut            # 安装快捷命令 vt
 bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
 bash vps.sh monitor             # 打开监控管理菜单
 bash vps.sh monitor hub-install # 仅在一台监控机安装 Prometheus + Grafana
-bash vps.sh monitor prepare-node # 在监控机生成每台节点的证书包
-bash vps.sh monitor node-install --bundle /root/节点名.tar.gz # 远端安装 HTTPS 采集器
-bash vps.sh monitor add-node    # 验证 mTLS 后接入，也可迁移旧 SSH 目标
+bash vps.sh monitor deploy-node # 填节点域名和 SSH 信息，自动安装并接入
+bash vps.sh monitor access      # 第 3 步：查看面板访问方法
+bash vps.sh monitor renew-node  # 一键续签并同步，无需手工传证书包
 bash vps.sh monitor cert-status # 查看证书有效期
 bash vps.sh monitor help        # 查看全部监控操作
 bash vps.sh tools               # 打开工具箱
@@ -140,7 +142,7 @@ docs/                   文档和配置示例
 - [一键部署节点](docs/deploy.md)：部署流程、参数、路由规则说明
 - [Hysteria2 端口跳跃](docs/hy2-port-hopping.md)
 - [3x-ui 面板](docs/3x-ui.md)
-- [多 VPS 监控](docs/monitoring.md)：安装角色、1 GB 试运行参数、HTTPS mTLS、源 IP 限制、证书续签及 SSH 迁移
+- [多 VPS 监控](docs/monitoring.md)：安装角色、1 GB 试运行参数、域名接入、SSH 自动部署、HTTPS mTLS、自动续签及旧版本迁移
 
 ## 注意事项
 

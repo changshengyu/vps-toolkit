@@ -99,6 +99,18 @@ def main():
                 raise AssertionError("Prometheus never successfully scraped the HTTPS target")
             time.sleep(1)
         print("PASS: real Prometheus scrapes Node Exporter over mTLS (up=1)", flush=True)
+        fixture.shell('''
+jq '.address="node.example.test"' "$PKI_DIR/nodes/isp-exit/node.json" > "$PKI_DIR/nodes/isp-exit/node.json.tmp"
+mv "$PKI_DIR/nodes/isp-exit/node.json.tmp" "$PKI_DIR/nodes/isp-exit/node.json"
+build_node_package isp-exit >/dev/null
+''')
+        for domain, expected in [("node.example.test", 0), ("wrong.example.test", 60)]:
+            result = subprocess.run(["curl", "--noproxy", "*", "--max-time", "10", "-fsS",
+                "--resolve", f"{domain}:{port}:127.0.0.1", "--cacert", str(tls / "ca.pem"),
+                "--cert", str(tls / "client.pem"), "--key", str(tls / "client-key.pem"),
+                f"https://{domain}:{port}/metrics"], capture_output=True)
+            assert result.returncode == expected, result.stderr.decode(errors="replace")
+        print("PASS: DNS SAN certificates accept the correct domain and reject a different domain", flush=True)
     except Exception:
         for name in (exporter, prometheus):
             subprocess.run(["docker", "logs", "--tail=40", name], check=False)
