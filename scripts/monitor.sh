@@ -25,6 +25,8 @@ TUNNEL_UNIT=vps-toolkit-monitor-tunnel@
 . "$ROOT_DIR/lib/monitor/tunnel.sh"
 # shellcheck source=../lib/monitor/grafana.sh
 . "$ROOT_DIR/lib/monitor/grafana.sh"
+# shellcheck source=../lib/monitor/backup.sh
+. "$ROOT_DIR/lib/monitor/backup.sh"
 
 show_help() {
     cat <<'HELP'
@@ -36,6 +38,11 @@ show_help() {
   grafana-account                修改 Grafana 用户名 / 密码
   grafana-check                  检查 Grafana 本机接口和重启 / 资源
   grafana-resources              持久调整 Grafana 内存并验证启动
+  backup-setup                  配置加密 Telegram 自动备份（北京时间）
+  backup-run                    立即备份并发送到个人 Bot 聊天
+  backup-status|backup-logs      查看备份状态 / 日志
+  backup-pause|backup-resume     暂停 / 恢复自动备份
+  backup-restore                在全新监控机恢复配置和 Grafana
   tunnel-setup                   自动配置 Cloudflare Tunnel 域名入口
   tunnel-status|tunnel-logs      查看入口连接状态或日志
   tunnel-stop|tunnel-start      暂停 / 恢复域名入口
@@ -77,6 +84,7 @@ compose() {
     local files=(-f "$MONITOR_DIR/compose.yaml")
     if [ -f "$MONITOR_DIR/compose.grafana.yaml" ]; then files+=(-f "$MONITOR_DIR/compose.grafana.yaml"); fi
     if [ -f "$MONITOR_DIR/compose.tunnel.yaml" ]; then files+=(-f "$MONITOR_DIR/compose.tunnel.yaml"); fi
+    if [ -f "$MONITOR_DIR/compose.restore.yaml" ]; then files+=(-f "$MONITOR_DIR/compose.restore.yaml"); fi
     docker compose --project-directory "$MONITOR_DIR" "${files[@]}" "$@"
 }
 
@@ -260,6 +268,9 @@ manage() {
     linux_root
     local action="$1" file
     if hub_installed; then
+        if [ -f "$MONITOR_DIR/.restore-incomplete" ] && [ "$action" != stop ]; then
+            die "恢复尚未完成，未启动服务；请查看备份恢复日志并检查数据库，勿直接删除 .restore-incomplete 标记。"
+        fi
         case "$action" in
             start) compose up -d ;;
             stop) compose stop ;;
@@ -302,6 +313,9 @@ uninstall() {
             rm -f "$SYSTEMD_DIR/$RENEW_SERVICE.timer" "$SYSTEMD_DIR/$RENEW_SERVICE.service"
             systemctl daemon-reload
         fi
+        if [ -f "$SYSTEMD_DIR/vps-toolkit-monitor-backup.timer" ]; then
+            systemctl disable --now vps-toolkit-monitor-backup.timer
+        fi
         compose down
         for file in "$SSH_DIR"/config.d/*; do
             [ -f "$file" ] || continue
@@ -343,16 +357,19 @@ main() {
             [ "$#" -eq 3 ] || die "缺少续期授权参数。"
             authorize_renewal_key "$2" "$3"
             ;;
-        prepare-node) prepare_node ;;
-        add-node) add_https_node ;;
-        remove-node) remove_node ;;
+        prepare-node) monitor_lock prepare_node ;;
+        add-node) monitor_lock add_https_node ;;
+        remove-node) monitor_lock remove_node ;;
         public-key) die "新节点已改用 HTTPS mTLS；请使用 prepare-node，不再生成 SSH 公钥。" ;;
         cert-status) cert_status ;;
-        cert-renew) shift; cert_renew "${1:-}" ;;
+        cert-renew) shift; monitor_lock cert_renew "${1:-}" ;;
         access) show_access ;;
         grafana-account) monitor_lock grafana_account ;;
         grafana-resources) monitor_lock grafana_resources ;;
         grafana-check) grafana_check ;;
+        backup-setup|backup-run|backup-status|backup-logs|backup-pause|backup-resume|backup-restore)
+            monitor_backup "${1#backup-}"
+            ;;
         tunnel-setup) monitor_lock tunnel_setup ;;
         tunnel-start) monitor_lock tunnel_start ;;
         tunnel-stop) monitor_lock tunnel_stop ;;

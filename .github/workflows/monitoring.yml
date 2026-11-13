@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Backup encryption dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y age
       - name: Shell syntax
         run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
       - name: Monitoring regression tests
@@ -24,6 +26,8 @@ jobs:
         run: python3 tests/monitoring_ssh_integration.py
       - name: Grafana account, production budget and Tunnel fallback
         run: python3 tests/monitoring_tunnel_integration.py
+      - name: Encrypted backup and fresh Grafana restore
+        run: sudo python3 tests/monitoring_backup_integration.py
       - name: Source IP restriction in isolated network namespace
         run: |
           sudo apt-get update -qq

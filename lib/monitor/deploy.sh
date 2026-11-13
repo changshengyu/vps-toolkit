@@ -16,7 +16,7 @@ build_toolkit_archive() {
     local archive="$1"
     COPYFILE_DISABLE=1 tar -czf "$archive" -C "$ROOT_DIR" \
         lib/common.sh lib/monitor/package.py lib/monitor/tls.sh \
-        lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh scripts/monitor.sh
+        lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/backup.sh lib/monitor/backup.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh scripts/monitor.sh
 }
 
 remote_install_command() {
@@ -175,7 +175,7 @@ install_renew_timer() {
     install -d -m 755 "$MONITOR_DIR/toolkit/scripts" "$MONITOR_DIR/toolkit/lib/monitor" "$MONITOR_DIR/toolkit/templates/monitoring"
     local path
     if [ ! "$ROOT_DIR" -ef "$MONITOR_DIR/toolkit" ]; then
-        for path in lib/common.sh scripts/monitor.sh lib/monitor/tls.sh lib/monitor/package.py lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh; do
+        for path in lib/common.sh scripts/monitor.sh lib/monitor/tls.sh lib/monitor/package.py lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/backup.sh lib/monitor/backup.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh; do
             install -m 644 "$ROOT_DIR/$path" "$MONITOR_DIR/toolkit/$path"
         done
         cp -R "$ROOT_DIR/templates/monitoring/." "$MONITOR_DIR/toolkit/templates/monitoring/"
