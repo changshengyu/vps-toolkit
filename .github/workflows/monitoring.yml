@@ -18,3 +18,10 @@ jobs:
           docker run --rm --entrypoint /bin/promtool
           --mount type=bind,src=${{ github.workspace }}/templates/monitoring/prometheus,dst=/etc/prometheus,readonly
           prom/prometheus:v3.16.0 check config /etc/prometheus/prometheus.yml
+      - name: HTTPS mTLS with real exporter and Prometheus
+        run: python3 tests/monitoring_https_integration.py
+      - name: Source IP restriction in isolated network namespace
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y nftables
+          sudo bash tests/monitoring_firewall_integration.sh
