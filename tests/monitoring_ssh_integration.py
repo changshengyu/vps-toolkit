@@ -74,7 +74,7 @@ exec /usr/sbin/sshd -D -e -f /test/sshd_config
         stub.mkdir(parents=True)
         shutil.copyfile(ROOT / "scripts/monitor.sh", stub / "monitor-real.sh")
         for relative in ["lib/common.sh", "lib/monitor/package.py", "lib/monitor/tls.sh", "lib/monitor/deploy.sh",
-                         "lib/monitor/renew.sh", "lib/monitor/tunnel.sh", "lib/monitor/cloudflare.py", "lib/monitor/grafana.py", "lib/monitor/grafana.sh", "lib/monitor/backup.sh", "lib/monitor/backup.py", "lib/monitor/restricted-renew.sh", "lib/monitor/remote-install.sh"]:
+                         "lib/monitor/renew.sh", "lib/monitor/hostkeys.py", "lib/monitor/tunnel.sh", "lib/monitor/cloudflare.py", "lib/monitor/grafana.py", "lib/monitor/grafana.sh", "lib/monitor/backup.sh", "lib/monitor/backup.py", "lib/monitor/restricted-renew.sh", "lib/monitor/remote-install.sh"]:
             target = fixture.path / "stub" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
@@ -143,6 +143,50 @@ renewal_ssh "$DEPLOY_DIR/$NODE_KEY.json" renew "$TMPDIR/wrong-node.tar.gz"
         assert result.returncode != 0
         assert after == docker("exec", server, "sha256sum", "/etc/vps-toolkit-monitor-node/server.pem").split()[0]
         print("PASS: restricted renewal rejects changes to node identity, port and source configuration", flush=True)
+        # Rotate the real server host key to exercise the interactive repair path.
+        client = keys / 'rekey-client'
+        subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(client)], check=True)
+        subprocess.run(['docker', 'exec', '-i', server, 'sh', '-c', 'cat >> /root/.ssh/authorized_keys'],
+                       input=client.with_suffix('.pub').read_bytes(), check=True)
+        docker('exec', server, 'ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', '/root/rotated-host')
+        rotated = docker('exec', server, 'cat', '/root/rotated-host.pub').split()[:2]
+        docker('exec', server, 'mv', '/root/rotated-host', '/root/test-host-key')
+        docker('kill', '--signal', 'HUP', server)
+        for attempt in range(20):
+            scan = subprocess.run(['ssh-keyscan', '-T', '1', '-p', str(port), '-t', 'ed25519', '127.0.0.1'],
+                                  text=True, capture_output=True)
+            if any(line.split()[1:3] == rotated for line in scan.stdout.splitlines() if not line.startswith('#')):
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError('sshd did not load the rotated host key')
+        with known_hosts.open('a') as stream:
+            stream.write('unrelated.example.test ' + public + '\n')
+        trusted_before = known_hosts.read_bytes()
+        fixture.env.update({'REKEY_PORT': str(port), 'REKEY_CLIENT': str(client),
+                            'MONITOR_KNOWN_HOSTS_FILE': str(known_hosts)})
+        connect = '''
+deploy_work="$TMPDIR/rekey-work"
+mkdir "$deploy_work"
+deploy_address=127.0.0.1; deploy_ssh_port="$REKEY_PORT"; deploy_family=inet
+deploy_destination=root@127.0.0.1
+deploy_ssh_args=(-F /dev/null -p "$REKEY_PORT" -i "$REKEY_CLIENT" -o IdentitiesOnly=yes -o IdentityAgent=none
+    -o BatchMode=yes -o "UserKnownHostsFile=$MONITOR_KNOWN_HOSTS_FILE" -o StrictHostKeyChecking=ask -o ConnectTimeout=5)
+trap 'ssh "${deploy_ssh_args[@]}" -S "$deploy_work/ssh.sock" -O exit -- "$deploy_destination" >/dev/null 2>&1 || true; rm -rf "$deploy_work"' EXIT
+connect_deployment
+'''
+        declined = fixture.shell('deploy_mode=interactive\n' + connect, stdin='\n', check=False)
+        assert declined.returncode != 0
+        assert known_hosts.read_bytes() == trusted_before
+        automated = fixture.shell('deploy_mode=batch\n' + connect, check=False)
+        assert automated.returncode == 255
+        assert known_hosts.read_bytes() == trusted_before
+        accepted = fixture.shell('deploy_mode=interactive\n' + connect, stdin='yes\n')
+        assert '已确认新指纹' in accepted.stdout
+        assert 'unrelated.example.test ' + public in known_hosts.read_text()
+        assert ' '.join(rotated) in known_hosts.read_text()
+        assert list(known_hosts.parent.glob('known_hosts.vps-toolkit-backup-*'))
+        print('PASS: real sshd host-key rotation, decline preserves trust, batch refuses, explicit confirmation pins retry and preserves unrelated hosts', flush=True)
     except Exception:
         subprocess.run(["docker", "logs", "--tail=30", server], check=False)
         raise
