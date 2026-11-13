@@ -74,7 +74,7 @@ exec /usr/sbin/sshd -D -e -f /test/sshd_config
         stub.mkdir(parents=True)
         shutil.copyfile(ROOT / "scripts/monitor.sh", stub / "monitor-real.sh")
         for relative in ["lib/common.sh", "lib/monitor/package.py", "lib/monitor/tls.sh", "lib/monitor/deploy.sh",
-                         "lib/monitor/renew.sh", "lib/monitor/tunnel.sh", "lib/monitor/cloudflare.py", "lib/monitor/grafana.py", "lib/monitor/grafana.sh", "lib/monitor/restricted-renew.sh", "lib/monitor/remote-install.sh"]:
+                         "lib/monitor/renew.sh", "lib/monitor/tunnel.sh", "lib/monitor/cloudflare.py", "lib/monitor/grafana.py", "lib/monitor/grafana.sh", "lib/monitor/backup.sh", "lib/monitor/backup.py", "lib/monitor/restricted-renew.sh", "lib/monitor/remote-install.sh"]:
             target = fixture.path / "stub" / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, target)
