@@ -1,5 +1,8 @@
 """Exercise real SQLite/age recovery sets, safe extraction and private Telegram uploads."""
 import contextlib
+from email.parser import BytesParser
+from email.policy import default as email_policy
+import http.server
 import importlib.util
 import io
 import json
@@ -8,9 +11,11 @@ from pathlib import Path
 import shutil
 import sqlite3
 import stat
+import ssl
 import subprocess
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch, Mock
 
@@ -222,32 +227,140 @@ class BackupTests(unittest.TestCase):
 
 
 class TelegramTests(unittest.TestCase):
-    def test_streaming_multipart_does_not_put_token_in_command_or_logs(self):
+    def client(self):
+        return b.Telegram({'token': TOKEN, 'chat_id': '123456789'})
+
+    def response(self, code=200, body=None, returncode=0):
+        payload = body if body is not None else {'ok': True, 'result': {'message_id': 1}}
+        return Mock(returncode=returncode, stdout=json.dumps(payload) + '\n' + str(code), stderr=TOKEN)
+
+    def test_ipv4_normal_get_verification_hides_url_and_sends_no_empty_form(self):
+        with patch.object(b.subprocess, 'run', return_value=self.response()) as command:
+            self.assertEqual(self.client().request('getMe')['message_id'], 1)
+        args = command.call_args.args[0]
+        config = command.call_args.kwargs['input']
+        self.assertIn('--ipv4', args)
+        self.assertIn('GET', args)
+        self.assertNotIn(TOKEN, str(args))
+        self.assertIn(TOKEN, config)
+        self.assertNotIn('form', config)
+        self.assertNotIn('--insecure', args)
+        self.assertNotIn('--location', args)
+        self.assertEqual(command.call_args.kwargs['timeout'], 25)
+
+    def test_upload_uses_curl_streaming_form_with_only_stdin_credentials(self):
         with tempfile.TemporaryDirectory() as temp:
             document = Path(temp) / 'backup-test.age'
             document.write_bytes(b'x' * (1024 * 1024))
-            connection = Mock()
-            response = connection.getresponse.return_value
-            response.status = 200
-            response.read.return_value = b'{"ok":true,"result":{"message_id":1}}'
-            with patch.object(b.http.client, 'HTTPSConnection', return_value=connection) as factory:
-                result = b.Telegram({'token': TOKEN, 'chat_id': '123456789'}).send(document, 'encrypted backup')
-            self.assertEqual(result['message_id'], 1)
-            factory.assert_called_once_with('api.telegram.org', timeout=120)
-            chunks = [call.args[0] for call in connection.send.call_args_list]
-            self.assertLessEqual(max(map(len, chunks)), 128 * 1024)
-            length = next(call.args[1] for call in connection.putheader.call_args_list if call.args[0] == 'Content-Length')
-            self.assertEqual(int(length), sum(map(len, chunks)))
-            self.assertIn(b'name="chat_id"', chunks[0])
+            with patch.object(b.subprocess, 'run', return_value=self.response()) as command:
+                self.client().send(document, 'encrypted backup')
+            self.assertNotIn(TOKEN, str(command.call_args.args))
+            config = command.call_args.kwargs['input']
+            self.assertIn('form-string', config)
+            self.assertIn('document=@', config)
+            self.assertNotIn('x' * 1024, config)
+            self.assertEqual(command.call_args.kwargs['timeout'], 185)
 
-    def test_server_errors_never_expose_bot_token_or_response_text(self):
-        connection = Mock()
-        response = connection.getresponse.return_value
-        response.status = 400
-        response.read.return_value = json.dumps({'ok': False, 'description': TOKEN}).encode()
-        with patch.object(b.http.client, 'HTTPSConnection', return_value=connection), self.assertRaises(b.Error) as result:
-            b.Telegram({'token': TOKEN, 'chat_id': '123456789'}).request('getMe')
+    def test_ipv6_is_only_tried_after_ipv4_transport_failure(self):
+        replies = [self.response(returncode=7), self.response()]
+        with patch.object(b.subprocess, 'run', side_effect=replies) as command:
+            self.client().request('getMe')
+        self.assertIn('--ipv4', command.call_args_list[0].args[0])
+        self.assertIn('--ipv6', command.call_args_list[1].args[0])
+
+    def test_connectivity_success_api_error_is_not_retried_or_echoed(self):
+        response = self.response(401, {'ok': False, 'error_code': 401, 'description': TOKEN})
+        output = io.StringIO()
+        with patch.object(b.subprocess, 'run', return_value=response) as command, \
+                contextlib.redirect_stdout(output), self.assertRaises(b.Error) as result:
+            self.client().request('getMe')
+        self.assertEqual(command.call_count, 1)
+        self.assertIn('Token 无效', str(result.exception))
+        self.assertNotIn(TOKEN, str(result.exception) + output.getvalue())
+
+    def test_timeout_is_bounded_retried_and_reports_verification_context(self):
+        output = io.StringIO()
+        with patch.object(b.subprocess, 'run', side_effect=subprocess.TimeoutExpired(['curl'], 25, output=TOKEN)), \
+                patch.object(b.time, 'sleep'), contextlib.redirect_stdout(output), self.assertRaises(b.Error) as result:
+            self.client().request('getMe')
+        message = str(result.exception)
+        self.assertIn('硬超时', message)
+        self.assertIn('尚未启用', message)
+        self.assertNotIn('本地加密文件保留', message)
+        self.assertNotIn(TOKEN, message + output.getvalue())
+
+    def test_invalid_json_is_reported_as_http_not_network_failure(self):
+        response = Mock(returncode=0, stdout='<html>private echo ' + TOKEN + '</html>\n400', stderr=TOKEN)
+        with patch.object(b.subprocess, 'run', return_value=response), self.assertRaises(b.Error) as result:
+            self.client().request('getMe')
+        self.assertIn('HTTP 400', str(result.exception))
+        self.assertIn('不是有效 JSON', str(result.exception))
         self.assertNotIn(TOKEN, str(result.exception))
+
+    def test_retry_after_does_not_trigger_ipv6_or_resend_on_bad_token(self):
+        replies = [self.response(429, {'ok': False, 'error_code': 429, 'parameters': {'retry_after': 2}}), self.response()]
+        with patch.object(b.subprocess, 'run', side_effect=replies) as command, patch.object(b.time, 'sleep') as sleep:
+            self.client().request('getChat', {'chat_id': '123456789'})
+        self.assertTrue(all('--ipv4' in call.args[0] for call in command.call_args_list))
+        sleep.assert_called_once_with(2)
+
+    @unittest.skipUnless(shutil.which('curl') and shutil.which('openssl'), 'requires curl and OpenSSL')
+    def test_real_curl_tls_get_json_and_quoted_multipart_upload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            cert, key = folder / 'cert.pem', folder / 'key.pem'
+            subprocess.run(['openssl', 'req', '-newkey', 'rsa:2048', '-nodes', '-x509', '-days', '1',
+                            '-subj', '/CN=api.telegram.org', '-addext', 'subjectAltName=DNS:api.telegram.org',
+                            '-keyout', str(key), '-out', str(cert)], check=True, capture_output=True)
+            received = []
+            class Handler(http.server.BaseHTTPRequestHandler):
+                def log_message(self, *args):
+                    pass
+                def reply(self, data):
+                    value = json.dumps({'ok': True, 'result': data}).encode()
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Content-Length', str(len(value)))
+                    self.end_headers()
+                    self.wfile.write(value)
+                def do_GET(self):
+                    received.append(('GET', self.headers.get('Content-Type'), b''))
+                    self.reply({'id': 1})
+                def do_POST(self):
+                    body = self.rfile.read(int(self.headers['Content-Length']))
+                    received.append(('POST', self.headers['Content-Type'], body))
+                    self.reply({'type': 'private'} if self.path.endswith('/getChat') else {'message_id': 1})
+            server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(str(cert), str(key))
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            real_run = subprocess.run
+            def local_tls(args, **kwargs):
+                # Test-only routing: production always verifies api.telegram.org directly.
+                args = list(args) + ['--connect-to', f'api.telegram.org:443:127.0.0.1:{server.server_port}', '--cacert', str(cert)]
+                return real_run(args, **kwargs)
+            content = b'age-encryption.org/v1\n' + bytes(range(256)) * 8192
+            document = folder / 'backup-"quote,semi;中文.age'
+            document.write_bytes(content)
+            try:
+                with patch.object(b.subprocess, 'run', side_effect=local_tls):
+                    self.client().verify()
+                    self.client().send(document, '加密备份 @caption')
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+            self.assertEqual(received[0], ('GET', None, b''))
+            self.assertEqual(json.loads(received[1][2]), {'chat_id': '123456789'})
+            header = ('Content-Type: ' + received[2][1] + '\r\nMIME-Version: 1.0\r\n\r\n').encode()
+            message = BytesParser(policy=email_policy).parsebytes(header + received[2][2])
+            fields = {part.get_param('name', header='content-disposition'): part.get_payload(decode=True)
+                      for part in message.iter_parts()}
+            self.assertEqual(fields['chat_id'], b'123456789')
+            self.assertEqual(fields['caption'], '加密备份 @caption'.encode())
+            self.assertEqual(fields['document'], content)
 
 
 if __name__ == '__main__':

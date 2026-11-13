@@ -50,6 +50,8 @@ vt monitor backup-status
 vt monitor backup-logs
 ```
 
+Telegram 连接优先使用 IPv4；IPv4 连接失败时才回退 IPv6。无需为了备份关闭 VPS 的 IPv6。验证请求单次最长 20 秒、上传单次最长 180 秒，连接阶段最长 6 秒，并有覆盖 DNS / 进程阻塞的硬超时。进度会显示当前 API 方法、IP 地址族和重试次数；错误区分 DNS、TCP、TLS、超时、非 JSON 响应与 Telegram API 权限 / 参数错误，不回显 Token、curl stderr 或响应正文。Token 无效、Chat ID 错误等明确的 API 拒绝不会通过换 IP 地址族重复尝试。
+
 日常流程是：取得部署锁 → 制作一致性数据库副本 → 压缩与 age 公钥加密 → 释放部署锁 → 上传加密文件 → 最后上传校验清单。只有全部文件的发送 API 都返回成功，才记录整组发送成功。网络故障最多重试三次；部分发送失败时本地加密文件保留，清单不会先于分卷发送。超时重试可能出现重复附件，以同组文件名和校验清单为准。
 
 Telegram 普通 Bot API 单文件目前上限 50 MB，本功能以 **45 MiB** 自动分卷。恢复时要下载同组的 `.manifest.json` 和**全部** `.age` / `.age.part-0001` 等附件，放在同一个目录。清单包含分卷顺序、大小和 SHA-256，不包含 Bot Token 或私钥；分卷合并解密后由 age 验证加密完整性。

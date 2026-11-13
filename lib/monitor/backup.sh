@@ -5,7 +5,7 @@ monitor_backup() {
     local action="$1"
     case "$action" in
         setup|run|restore|resume)
-            ensure_packages python3 age
+            ensure_packages python3 age curl
             require_command age-keygen
             ;;
     esac
