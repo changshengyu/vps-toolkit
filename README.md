@@ -12,6 +12,7 @@
 | geodata 自动更新 | `geodata` | 只为已有 3x-ui 开启 / 关闭 geoip、geosite 自动更新 |
 | Hysteria2 端口跳跃 | `hy2` | 用 nftables 重定向端口，重启后自动恢复，详见[文档](docs/hy2-port-hopping.md) |
 | 3x-ui 面板 | `3x-ui` | 运行 [3x-ui](https://github.com/MHSanaei/3x-ui) 官方安装脚本，详见[文档](docs/3x-ui.md) |
+| 多 VPS 监控 | `monitor` | 集中端 Prometheus + Grafana、节点端 Node Exporter，SSH 隧道接入，详见[文档](docs/monitoring.md) |
 | IPv6 开关 | `ipv6` | 查看 / 开启 / 关闭系统 IPv6，重启后保持；纯 IPv6 机器不允许关闭 |
 | VPS 多功能工具箱 | `tools` | 运行 [vps_scripts](https://github.com/everett7623/vps_scripts) |
 
@@ -73,6 +74,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 ├─ 4. 系统设置（IPv6）>    查看状态 / 开启 / 关闭
 ├─ 5. VPS 多功能工具箱
 ├─ 6. 安装快捷命令 vt
+├─ 7. 监控管理 >          监控机安装 / 节点采集器 / 接入与移除节点 / 状态与日志 / 启停 / 卸载
 └─ 0. 退出
 ```
 
@@ -104,6 +106,11 @@ bash vps.sh 3x-ui status        # 查看 3x-ui 状态
 bash vps.sh result              # 查看上次部署结果
 bash vps.sh shortcut            # 安装快捷命令 vt
 bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
+bash vps.sh monitor             # 打开监控管理菜单
+bash vps.sh monitor hub-install # 仅在一台监控机安装 Prometheus + Grafana
+bash vps.sh monitor node-install # 其他 VPS 仅安装 Node Exporter
+bash vps.sh monitor add-node    # 在监控机接入远端节点
+bash vps.sh monitor help        # 查看全部监控操作
 bash vps.sh tools               # 打开工具箱
 ```
 
@@ -131,6 +138,7 @@ docs/                   文档和配置示例
 - [一键部署节点](docs/deploy.md)：部署流程、参数、路由规则说明
 - [Hysteria2 端口跳跃](docs/hy2-port-hopping.md)
 - [3x-ui 面板](docs/3x-ui.md)
+- [多 VPS 监控](docs/monitoring.md)：安装角色、1 GB 试运行参数、SSH 接入、访问和维护
 
 ## 注意事项
 
