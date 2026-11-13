@@ -1,4 +1,4 @@
-"""Cloudflare API and local Tunnel configuration. Standard library only.
+"""Cloudflare API and local Tunnel configuration. Python stdlib + bounded curl.
 
 The API token is read from a temporary file, never argv, environment or logs.
 Only resources journaled by this module may be removed. No global tunnel cleanup.
@@ -9,13 +9,13 @@ import os
 from pathlib import Path
 import re
 import secrets
+import subprocess
 import sys
-import urllib.error
 import urllib.parse
-import urllib.request
 
 
 IMAGE = "cloudflare/cloudflared:2026.11.0"
+REQUEST_TIMEOUT = 30
 
 
 class Error(Exception):
@@ -43,9 +43,18 @@ def atomic_json(path, data):
     os.replace(temp, path)
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None
+def api_progress(method, path):
+    if path.startswith("/zones?"):
+        message = "识别域名所属账户和 Zone"
+    elif "/dns_records" in path:
+        message = {"GET": "检查 DNS 记录", "POST": "创建面板 CNAME", "DELETE": "移除本工具的 CNAME"}[method]
+    elif path.endswith("/configurations"):
+        message = "配置 Grafana 转发路由"
+    elif path.endswith("/token"):
+        message = "获取 Tunnel 连接凭据"
+    else:
+        message = {"GET": "检查 Tunnel 记录", "POST": "创建 Tunnel", "DELETE": "移除本工具的 Tunnel"}[method]
+    print(f"Cloudflare：{message}（单次请求最多 30 秒）…", file=sys.stderr, flush=True)
 
 
 class API:
@@ -53,25 +62,44 @@ class API:
         self.token = Path(token_file).read_text().strip()
         if not re.fullmatch(r"[A-Za-z0-9_-]{20,512}", self.token):
             raise Error("API Token 格式无效。")
-        self.opener = urllib.request.build_opener(NoRedirect())
 
     def call(self, method, path, data=None):
-        request = urllib.request.Request(
-            "https://api.cloudflare.com/client/v4" + path,
-            data=json.dumps(data).encode() if data is not None else None,
-            headers={"Authorization": "Bearer " + self.token, "Content-Type": "application/json"},
-            method=method,
-        )
+        api_progress(method, path)
+        # -q disables .curlrc (in particular verbose output and redirects).
+        # Put the bearer header in curl's stdin config, never argv or env.
+        # curl supplies dual-stack fallback and DNS/connect/transfer deadlines;
+        # subprocess supplies a wall-clock cap even if the resolver stalls.
+        config = 'header = "Authorization: Bearer ' + self.token + '"\n'
+        config += 'header = "Content-Type: application/json"\n'
+        if data is not None:
+            config += "data-binary = " + json.dumps(json.dumps(data, ensure_ascii=True)) + "\n"
+        args = ["curl", "-q", "--silent", "--show-error", "--connect-timeout", "8", "--max-time", "25",
+                "--proto", "=https", "--config", "-", "--request", method,
+                "--url", "https://api.cloudflare.com/client/v4" + path,
+                "--write-out", "\n%{http_code}"]
         try:
-            with self.opener.open(request, timeout=30) as response:
-                payload = json.load(response)
-        except urllib.error.HTTPError as exc:
-            # Never print response bodies: create-tunnel responses contain secrets.
-            raise Error(f"Cloudflare API HTTP {exc.code}；请检查 Token 权限、资源范围及网络。", exc.code) from None
-        except (OSError, ValueError):
-            raise Error("Cloudflare API 请求失败；请检查网络后重试，已创建资源的记录会保留。") from None
-        if not payload.get("success"):
-            raise Error("Cloudflare API 拒绝操作；请检查 Token 权限和资源范围。")
+            result = subprocess.run(args, input=config, text=True, encoding="utf-8",
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=REQUEST_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            raise Error("Cloudflare API 请求超过 30 秒，已终止；请检查 DNS 和出站 HTTPS 网络后重试。") from None
+        except OSError:
+            raise Error("无法运行 curl；请确认已安装 curl。") from None
+        # Neither curl stderr nor response bodies may be echoed: both can contain
+        # credentials. Report only the transport exit code or HTTP status.
+        if result.returncode:
+            if result.returncode == 28:
+                raise Error("Cloudflare API 网络请求超时（DNS / 连接 / 传输）；请检查出站 HTTPS 网络后重试。")
+            raise Error(f"Cloudflare API 网络请求失败（curl 退出码 {result.returncode}）；请检查 DNS、TLS 和出站 HTTPS 网络。")
+        try:
+            body, status_text = result.stdout.rsplit("\n", 1)
+            status = int(status_text)
+            if not 200 <= status < 300:
+                raise Error(f"Cloudflare API HTTP {status}；请检查 Token 权限、资源范围及网络。", status)
+            payload = json.loads(body)
+            if not isinstance(payload, dict) or not payload.get("success"):
+                raise Error("Cloudflare API 拒绝操作；请检查 Token 权限和资源范围。")
+        except (ValueError, TypeError):
+            raise Error("Cloudflare API 返回格式异常；请检查网络后重试。") from None
         return payload.get("result")
 
 

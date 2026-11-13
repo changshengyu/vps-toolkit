@@ -107,7 +107,7 @@ vt monitor access
 
 1. 准备一个由 Cloudflare 托管的新子域名，例如 `monitor.yuchangsheng.top`。使用托管域名的一级子域名，以匹配 Universal SSL。**不用预先添加解析到 VPS IP 的 A/AAAA 记录**；已有同名记录会拒绝配置，不会覆盖。
 2. 在 Cloudflare 创建自定义 API Token，限制到所选账户及域名：`Account / Cloudflare Tunnel / Edit`、`Zone / DNS / Edit`、`Zone / Zone / Read`。最后一项用于自动识别 Zone 和账户。不要使用 Global API Key。
-3. 在 VPS 终端按提示输入域名、确认后隐藏输入 Token。脚本自动创建远程管理的 Tunnel、仅到 `http://127.0.0.1:3000` 的路由及橙云 CNAME，启动固定版本 `cloudflare/cloudflared:2026.11.0`。
+3. 在 VPS 终端按提示输入域名、确认后粘贴 Token 并按一次回车；输入期间不显示字符，随后提示“Token 已接收”。每个 API 步骤显示进度，网络请求有 30 秒硬超时（含 DNS / 连接 / 响应等待），curl 支持 IPv4 / IPv6 回退。脚本自动创建远程管理的 Tunnel、仅到 `http://127.0.0.1:3000` 的路由及橙云 CNAME，启动固定版本 `cloudflare/cloudflared:2026.11.0`。
 4. 通过 `https://monitor.yuchangsheng.top/` 登录 Grafana；用户名 admin，已有密码不变。初始密码保存在 `/opt/vps-toolkit-monitor/.env`，只在自己的终端查看。
 
 Cloudflare 自动签发和续签浏览器入口 HTTPS 证书；VPS 不需要 ACME、开放入站端口或占用 80/443。首次启用可能需要等待边缘证书生效。监控机需能出站连接 Cloudflare TCP/UDP 7844；默认优先 QUIC，受限时回退 HTTP/2。浏览器到 Cloudflare、Cloudflare 到 cloudflared 均加密，cloudflared 到 Grafana 仅走本机 HTTP。Prometheus 和 Node Exporter 不公开。
@@ -139,6 +139,21 @@ vt monitor tunnel-remove    # 再次输入 API Token，删除本工具的 CNAME 
 域名模式启用 Grafana HTTPS 根地址和 Secure Cookie。需要通过下面的 SSH HTTP 地址登录时，先运行 `tunnel-stop`；Prometheus 的 SSH 访问不受影响。配置 / 暂停会重建 Grafana 容器，有短暂面板中断，不删除数据卷、不重启 Prometheus、不改变采集、3x-ui 或 Xray。
 
 创建失败时自动停止本次入口并尝试清理本次新建的云端资源；API 不可达或 Tunnel 仍显示在线时保留归属记录，可稍后 `tunnel-remove` 重试。清理只处理本工具记录的 Tunnel 及仍指向它的 CNAME，不删除后来改成其他目标的 DNS；Tunnel 被手工改名时停止删除并要求检查。不要在配置过程中手工删除本地 `tunnel/state.json`。集中端 `stop/uninstall` 停止连接器但保留云端记录和配置；彻底删除入口需要单独 `tunnel-remove`，Grafana / Prometheus 历史均保留。
+
+### Token 输入后看似卡住时
+
+先确认已按回车。新版会立即显示“Token 已接收”和当前 API 步骤；网络超时会明确报错，已有资源仍按归属记录清理或保留重试。不要在未看到 shell 提示符时反复输入 Token 或粘贴命令，也不要删除 `tunnel/state.json`。
+
+可在另一个 SSH 窗口执行只读检查，不需要提供 Token：
+
+```bash
+pgrep -af '[p]ython3 .*/lib/monitor/cloudflare.py' || true
+curl -4 -sS --connect-timeout 5 --max-time 15 -o /dev/null \
+  -w 'HTTP=%{http_code} IP=%{remote_ip} 耗时=%{time_total}s\n' \
+  https://api.cloudflare.com/client/v4/
+```
+
+curl 此处未认证，收到 401/403/404 仍能确认 HTTPS 收到响应，不能据此判断 API Token 权限。输出 curl 错误码 6 是解析失败、28 是网络超时；下一步再检查 DNS 或出站 HTTPS。旧版长时间无输出时可按一次 Ctrl+C，等待回滚结束再用新版本查看 `tunnel-status`；中断后的残留记录用 `tunnel-remove` 清理，勿直接覆盖。
 
 ### 备用：SSH 访问
 

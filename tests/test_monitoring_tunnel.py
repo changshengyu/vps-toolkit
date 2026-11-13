@@ -1,10 +1,16 @@
 """Cloudflare API and lifecycle regressions, without network or real credentials."""
+import contextlib
+import http.server
+import io
 import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import ssl
+import sys
+import time
+import threading
 import unittest
-import urllib.error
 from unittest.mock import patch
 
 from test_monitoring import MonitoringFixture, ROOT
@@ -157,18 +163,100 @@ class TunnelTests(MonitoringFixture):
         self.assertTrue((self.directory / "state.json").exists())
         self.assertFalse(any(m == "DELETE" and "/cfd_tunnel/" in p for m, p, _ in self.api.calls))
 
-    def test_api_errors_never_echo_bearer_or_response_body(self):
+    def make_api(self):
         token = self.path / "api-token"
         token.write_text("private-api-token-for-tests-only-1234")
-        api = cf.API(token)
-        error = urllib.error.HTTPError("https://api.cloudflare.com/", 403,
-                                      "forbidden " + token.read_text(), {}, None)
-        with patch.object(api.opener, "open", side_effect=error):
-            with self.assertRaises(cf.Error) as result:
-                api.call("POST", "/accounts/example/cfd_tunnel")
-        self.assertNotIn(token.read_text(), str(result.exception))
-        self.assertIn("403", str(result.exception))
-        self.assertIsNone(cf.NoRedirect().redirect_request(None, None, None, None, None, None))
+        return cf.API(token)
+
+    def test_api_errors_never_echo_bearer_or_response_body(self):
+        api = self.make_api()
+        for status, code in ((403, 0), (302, 0), (200, 60), (200, 28)):
+            with self.subTest(status=status, code=code):
+                response = subprocess.CompletedProcess([], code,
+                    json.dumps({"secret": api.token}) + "\n" + str(status), api.token)
+                messages = io.StringIO()
+                with patch.object(cf.subprocess, "run", return_value=response) as transport, contextlib.redirect_stderr(messages):
+                    with self.assertRaises(cf.Error) as result:
+                        api.call("POST", "/accounts/example/cfd_tunnel")
+                self.assertNotIn(api.token, str(result.exception) + messages.getvalue())
+                self.assertNotIn(api.token, " ".join(transport.call_args.args[0]))
+                self.assertEqual(transport.call_args.kwargs["timeout"], 30)
+                self.assertIn(api.token, transport.call_args.kwargs["input"])
+                self.assertIn("创建 Tunnel", messages.getvalue())
+
+    def test_stalled_resolver_has_a_hard_deadline_and_sanitized_error(self):
+        api = self.make_api()
+        error = subprocess.TimeoutExpired(["curl"], 30, output=api.token, stderr=api.token)
+        with patch.object(cf.subprocess, "run", side_effect=error):
+            with self.assertRaisesRegex(cf.Error, "超过 30 秒") as result:
+                api.call("GET", "/zones?name=example.com")
+        self.assertNotIn(api.token, str(result.exception))
+
+    def test_hung_transport_process_is_terminated_at_wall_deadline(self):
+        api = self.make_api()
+        real_run = subprocess.run
+
+        def hung_transport(args, **kwargs):
+            return real_run([sys.executable, "-c", "import time; time.sleep(60)"], **kwargs)
+
+        started = time.monotonic()
+        with patch.object(cf, "REQUEST_TIMEOUT", 0.15), patch.object(cf.subprocess, "run", side_effect=hung_transport):
+            with self.assertRaises(cf.Error):
+                api.call("GET", "/zones?name=example.com")
+        self.assertLess(time.monotonic() - started, 3)
+
+    def test_token_read_acknowledges_enter_without_echoing_secret(self):
+        token = "private-test-token-not-for-use-12345"
+        r = self.shell('cf_api_token="$MONITOR_DIR/temporary-token"; cf_read_token', stdin=token + "\n")
+        self.assertIn("Token 已接收", r.stdout)
+        self.assertNotIn(token, r.stdout + r.stderr)
+        self.assertEqual((self.hub / "temporary-token").read_text(), token)
+
+    def test_real_curl_sends_stdin_header_and_json_over_verified_tls(self):
+        from test_monitoring_tls import TLSFixture
+        fixture = TLSFixture()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        fixture.make_certificates("127.0.0.1", "127.0.0.1")
+        requests = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                requests.append((self.headers.get("Authorization"),
+                                 json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+                body = json.dumps({"success": True, "result": {"id": TUNNEL}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(fixture.pki / "nodes/isp-exit/server.pem", fixture.pki / "nodes/isp-exit/server-key.pem")
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        api = self.make_api()
+        real_run = subprocess.run
+
+        def local_transport(args, **kwargs):
+            args = list(args)
+            args[args.index("--url") + 1] = f"https://127.0.0.1:{server.server_port}/"
+            args += ["--cacert", str(fixture.pki / "ca.pem"), "--noproxy", "*"]
+            return real_run(args, **kwargs)
+
+        try:
+            data = {"name": "a\\b\"c\nd", "unicode": "测试", "config": {"enabled": True}}
+            with patch.object(cf.subprocess, "run", side_effect=local_transport):
+                self.assertEqual(api.call("POST", "/accounts/example/cfd_tunnel", data), {"id": TUNNEL})
+            self.assertEqual(requests, [("Bearer " + api.token, data)])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
 
     def test_pause_restores_base_and_preserves_secrets_and_data(self):
         self.create()
