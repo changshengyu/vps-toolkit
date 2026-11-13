@@ -337,6 +337,34 @@ monitor_services_menu() {
     done
 }
 
+monitor_access_menu() {
+    while true; do
+        menu_header
+        menu_items "面板访问（Cloudflare Tunnel / SSH）" \
+            "配置 Grafana 域名入口（自动创建 Tunnel）" \
+            "查看面板地址和 SSH 访问方法" \
+            "查看域名入口状态" \
+            "查看域名入口日志" \
+            "暂停域名入口，恢复 SSH 访问" \
+            "恢复域名入口" \
+            "移除域名入口（保留监控数据）"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 7
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-setup ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-status ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-logs ;;
+            5) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-stop ;;
+            6) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-start ;;
+            7) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-remove ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 monitor_menu() {
     while true; do
         menu_header
@@ -344,7 +372,7 @@ monitor_menu() {
         menu_items "监控管理（Prometheus + Grafana）" \
             "安装监控机（首次，仅一台）" \
             "添加 / 部署被监控节点（自动流程）" \
-            "查看面板访问方法" \
+            "面板访问（域名 / SSH）>" \
             "查看状态和资源占用" \
             "查看日志" \
             "节点管理 / 手动接入 >" \
@@ -355,7 +383,7 @@ monitor_menu() {
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
             2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
+            3) monitor_access_menu; continue ;;
             4) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
             5) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
             6) monitor_nodes_menu; continue ;;

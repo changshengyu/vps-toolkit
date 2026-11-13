@@ -74,11 +74,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 ├─ 4. 系统设置（IPv6）>    查看状态 / 开启 / 关闭
 ├─ 5. VPS 多功能工具箱
 ├─ 6. 安装快捷命令 vt
-├─ 7. 监控管理 >          按顺序：1 安装监控机 → 2 自动添加节点 → 3 查看面板
+├─ 7. 监控管理 >          按顺序：1 安装监控机 → 2 自动添加节点 → 3 面板访问
 └─ 0. 退出
 ```
 
-监控管理按实际顺序排列：在监控机依次选择 **1 安装 → 2 自动添加节点 → 3 查看面板**。已有直连域名可直接使用；首次 SSH 认证后自动配置受限续期密钥，后续证书自动续签同步，无需再次输入密码或手工传包。
+监控管理按实际顺序排列：在监控机依次选择 **1 安装 → 2 自动添加节点 → 3 面板访问**。已有直连域名可直接使用；首次 SSH 认证后自动配置受限续期密钥，后续证书自动续签同步，无需再次输入密码或手工传包。第 3 项支持自动创建 Cloudflare Tunnel 和域名入口，入口 HTTPS 证书由 Cloudflare 自动续签，无需占用代理的 80/443。
 
 选 6 安装快捷命令后，以后直接输入 `vt` 打开菜单（每次运行仓库最新版），也可以带参数，如 `vt deploy --config-only`。
 
@@ -111,7 +111,8 @@ bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
 bash vps.sh monitor             # 打开监控管理菜单
 bash vps.sh monitor hub-install # 仅在一台监控机安装 Prometheus + Grafana
 bash vps.sh monitor deploy-node # 填节点域名和 SSH 信息，自动安装并接入
-bash vps.sh monitor access      # 第 3 步：查看面板访问方法
+bash vps.sh monitor tunnel-setup # 第 3 步：自动配置 Grafana HTTPS 域名入口
+bash vps.sh monitor access      # 查看域名地址或备用 SSH 访问方法
 bash vps.sh monitor renew-node  # 一键续签并同步，无需手工传证书包
 bash vps.sh monitor cert-status # 查看证书有效期
 bash vps.sh monitor help        # 查看全部监控操作

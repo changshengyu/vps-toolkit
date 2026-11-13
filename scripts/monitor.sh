@@ -21,6 +21,8 @@ TUNNEL_UNIT=vps-toolkit-monitor-tunnel@
 . "$ROOT_DIR/lib/monitor/deploy.sh"
 # shellcheck source=../lib/monitor/renew.sh
 . "$ROOT_DIR/lib/monitor/renew.sh"
+# shellcheck source=../lib/monitor/tunnel.sh
+. "$ROOT_DIR/lib/monitor/tunnel.sh"
 
 show_help() {
     cat <<'HELP'
@@ -29,6 +31,10 @@ show_help() {
   hub-install                    安装监控机（仅一台）
   deploy-node                    填域名和 SSH 信息，自动安装并接入节点
   access                         查看面板访问方法
+  tunnel-setup                   自动配置 Cloudflare Tunnel 域名入口
+  tunnel-status|tunnel-logs      查看入口连接状态或日志
+  tunnel-stop|tunnel-start      暂停 / 恢复域名入口
+  tunnel-remove                  移除本工具的 Tunnel 和 CNAME，保留数据
   status|logs                    查看本机状态或日志
   renew-node                     无密码续签并同步远端证书
   cert-status                    查看证书有效期
@@ -62,7 +68,11 @@ valid_port() {
 hub_installed() { [ -f "$MONITOR_DIR/.vps-toolkit-managed" ]; }
 node_installed() { [ -f "$NODE_DIR/.vps-toolkit-managed" ]; }
 require_hub() { hub_installed || die "请先在本机安装监控机。"; }
-compose() { docker compose --project-directory "$MONITOR_DIR" -f "$MONITOR_DIR/compose.yaml" "$@"; }
+compose() {
+    local files=(-f "$MONITOR_DIR/compose.yaml")
+    if [ -f "$MONITOR_DIR/compose.tunnel.yaml" ]; then files+=(-f "$MONITOR_DIR/compose.tunnel.yaml"); fi
+    docker compose --project-directory "$MONITOR_DIR" "${files[@]}" "$@"
+}
 
 check_ports() {
     local port
@@ -197,10 +207,17 @@ remove_node() {
 
 show_access() {
     require_hub
+    local grafana_access="Grafana：http://127.0.0.1:13000 （admin）"
+    if [ -f "$CF_OVERLAY" ]; then
+        cloudflare status "$CF_DIR"
+        info "Grafana 用户名：admin；初始密码在 $MONITOR_DIR/.env。已有数据库密码不变。"
+        info "HTTPS 安全 Cookie 已启用。要用 SSH HTTP 登录 Grafana，请先运行 vt monitor tunnel-stop。"
+        grafana_access="Grafana：使用上方 HTTPS 域名；暂停域名入口后可用 http://127.0.0.1:13000。"
+    fi
     cat <<ACCESS
 在 Mac 终端运行（替换用户名、IP 和 SSH 端口）：
 ssh -N -T -p SSH端口 -L 127.0.0.1:13000:127.0.0.1:3000 -L 127.0.0.1:19090:127.0.0.1:9090 用户名@监控机IP
-Grafana：http://127.0.0.1:13000 （admin）
+$grafana_access
 Prometheus：http://127.0.0.1:19090/targets
 Grafana 初始密码保存在 $MONITOR_DIR/.env，仅在自己的终端查看。
 Mac 断开不影响采集；修改 .env 不会重置已有 Grafana 数据库的密码。
@@ -282,6 +299,7 @@ uninstall() {
             systemctl disable --now "${TUNNEL_UNIT}$(basename "$file")" || true
         done
         info "容器已移除，Docker 数据卷和 $MONITOR_DIR 均保留，start 可恢复。"
+        if [ -f "$CF_DIR/state.json" ]; then info "Cloudflare 入口记录保留；彻底删除请另运行 vt monitor tunnel-remove。"; fi
     elif node_installed; then
         systemctl disable --now "$NODE_SERVICE"
         revoke_renewal_key
@@ -323,6 +341,12 @@ main() {
         cert-status) cert_status ;;
         cert-renew) shift; cert_renew "${1:-}" ;;
         access) show_access ;;
+        tunnel-setup) monitor_lock tunnel_setup ;;
+        tunnel-start) monitor_lock tunnel_start ;;
+        tunnel-stop) monitor_lock tunnel_stop ;;
+        tunnel-remove) monitor_lock tunnel_remove ;;
+        tunnel-status) tunnel_status ;;
+        tunnel-logs) tunnel_logs ;;
         status) show_status ;;
         logs) show_logs ;;
         start | stop | restart) manage "$1" ;;
