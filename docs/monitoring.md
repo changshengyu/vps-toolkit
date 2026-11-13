@@ -226,7 +226,7 @@ VPS 关机或网络断开期间仍然无法采集，Node Exporter 不补传历�
 
 ## 验证与资料
 
-离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。Tunnel 回归使用模拟 API 验证 DNS 冲突、失败回滚、断网重试及凭据隐藏；`python3 tests/monitoring_tunnel_integration.py` 使用真实 cloudflared CLI 和 Grafana 容器验证 Compose 合并、HTTPS 根地址 / Cookie、暂停后的 SSH 登录和密码保留，不使用真实 Cloudflare 账户。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
+离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。Tunnel 回归使用模拟 API 验证 DNS 冲突、失败回滚、断网重试及凭据隐藏；`python3 tests/monitoring_tunnel_integration.py` 使用真实 cloudflared CLI 和 Grafana 容器验证 Compose 合并、HTTPS 根地址 / Cookie、暂停后的 SSH 登录和密码保留，不使用真实 Cloudflare 账户。该功能集成测试容器单独使用 256 MiB / 1 CPU 以覆盖首次初始化开销，不代表 192 MiB 紧凑试运行参数的容量保证；低配机器仍需观察内存和重启情况。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
 
 - [Node Exporter](https://github.com/prometheus/node_exporter)
 - [Exporter Toolkit TLS 配置](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md)
