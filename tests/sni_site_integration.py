@@ -49,12 +49,14 @@ def main():
         print('PASS: real pinned Caddy validates production TLS-ALPN-only ACME, TCP 443, no redirect or HTTP/3 config', flush=True)
         ca, ca_key, cert, key = [root / name for name in ('ca.pem', 'ca-key.pem', 'cert.pem', 'key.pem')]
         openssl('req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
-                '-subj', '/CN=SNI site fixture CA', '-days', '1', '-keyout', ca_key, '-out', ca)
+                '-subj', '/CN=SNI site fixture CA', '-days', '1', '-keyout', ca_key, '-out', ca,
+                '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign,cRLSign',
+                '-addext', 'subjectKeyIdentifier=hash')
         csr = root / 'site.csr'
         openssl('req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
                 '-subj', '/CN=site.example.com', '-keyout', key, '-out', csr)
         ext = root / 'extensions'
-        ext.write_text('subjectAltName=DNS:site.example.com\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n')
+        ext.write_text('subjectAltName=DNS:site.example.com\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n')
         openssl('x509', '-req', '-in', csr, '-CA', ca, '-CAkey', ca_key, '-set_serial', '1',
                 '-days', '1', '-extfile', ext, '-out', cert)
         runtime = copy.deepcopy(value)
@@ -77,18 +79,21 @@ def main():
             process = subprocess.Popen([str(binary), 'run', '--config', str(runtime_path)],
                                        env=env, stdout=stream, stderr=subprocess.STDOUT)
         context = ssl.create_default_context(cafile=str(ca))
+        context.verify_flags |= ssl.VERIFY_X509_STRICT
         try:
+            last_probe = ''
             for _ in range(80):
                 try:
                     expiry = s.probe('site.example.com', port=18443, context=context)
                     assert expiry
                     break
-                except (OSError, s.Error):
+                except (OSError, s.Error) as exc:
+                    last_probe = str(exc)
                     if process.poll() is not None:
                         raise AssertionError(log.read_text())
                     time.sleep(0.2)
             else:
-                raise AssertionError('TLS probe failed\n' + log.read_text())
+                raise AssertionError('TLS probe failed: ' + last_probe + '\n' + log.read_text())
             for port in free_tcp:
                 with socket.socket() as probe:
                     probe.bind(('127.0.0.1', port))

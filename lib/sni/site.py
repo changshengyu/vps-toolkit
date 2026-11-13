@@ -454,7 +454,7 @@ def main():
         return 0
     except (Error, OSError, ValueError, KeyError, TypeError, tarfile.TarError, subprocess.TimeoutExpired):
         exc = sys.exc_info()[1]
-        print('错误：' + (str(exc) if isinstance(exc, Error) else '站点操作失败，请检查配置、权限、网络和日志。'), file=sys.stderr)
+        print('错误：' + (str(exc) if isinstance(exc, (Error, ssl.SSLError)) else '站点操作失败，请检查配置、权限、网络和日志。'), file=sys.stderr)
         return 1
     except (EOFError, KeyboardInterrupt):
         print('\n已取消。', file=sys.stderr)
