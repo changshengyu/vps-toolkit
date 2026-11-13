@@ -53,6 +53,7 @@ show_help() {
   geodata [cron|off]         开启 / 关闭 3x-ui 的 geodata 自动更新
   result                     查看上次部署结果
   ipv6 status|enable|disable 查看 / 开启 / 关闭系统 IPv6
+  monitor [操作]             管理 Prometheus / Grafana 监控（help 查看操作）
   shortcut                   安装快捷命令 vt
   tools [上游参数]           运行 VPS 多功能工具箱
   help                       显示帮助
@@ -274,6 +275,44 @@ hy2_menu() {
     done
 }
 
+monitor_menu() {
+    while true; do
+        menu_header
+        menu_items "监控管理（Prometheus + Grafana）" \
+            "本机作为监控机：安装完整套件" \
+            "本机作为被监控节点：只安装采集器" \
+            "接入远端节点（在监控机操作）" \
+            "移除远端节点（在监控机操作）" \
+            "查看状态和资源占用" \
+            "查看日志" \
+            "查看面板访问方法" \
+            "查看监控机 SSH 公钥" \
+            "启动监控服务" \
+            "停止监控服务" \
+            "重启监控服务" \
+            "卸载监控服务（保留数据）"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 12
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" node-install ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" add-node ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" remove-node ;;
+            5) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
+            6) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
+            7) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
+            8) run bash "$ROOT_DIR/scripts/monitor.sh" public-key ;;
+            9) run bash "$ROOT_DIR/scripts/monitor.sh" start ;;
+            10) run bash "$ROOT_DIR/scripts/monitor.sh" stop ;;
+            11) run bash "$ROOT_DIR/scripts/monitor.sh" restart ;;
+            12) run bash "$ROOT_DIR/scripts/monitor.sh" uninstall ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 system_menu() {
     while true; do
         menu_header
@@ -307,9 +346,10 @@ main_menu() {
             "Hysteria2 端口跳跃 >" \
             "系统设置（IPv6）>" \
             "VPS 多功能工具箱" \
-            "安装快捷命令 vt"
+            "安装快捷命令 vt" \
+            "监控管理（Prometheus + Grafana）>"
         printf '  %s0.%s 退出\n' "$C_GREEN" "$C_RESET"
-        read_choice 6
+        read_choice 7
         case "$CHOICE" in
             1) deploy_menu ;;
             2) xui_menu ;;
@@ -317,6 +357,7 @@ main_menu() {
             4) system_menu ;;
             5) run bash "$ROOT_DIR/scripts/vps-tools.sh"; pause ;;
             6) run install_shortcut; pause ;;
+            7) monitor_menu ;;
             0) exit 0 ;;
             *) warn "无效选项：$CHOICE" ;;
         esac
@@ -335,6 +376,14 @@ case "${1:-menu}" in
     geodata) bash "$ROOT_DIR/scripts/xui-geodata.sh" "${2:-0 20 * * *}" ;;
     result) show_result ;;
     ipv6) bash "$ROOT_DIR/scripts/ipv6.sh" "${2:-status}" ;;
+    monitor)
+        shift
+        if [ "$#" -eq 0 ]; then
+            monitor_menu
+        else
+            bash "$ROOT_DIR/scripts/monitor.sh" "$@"
+        fi
+        ;;
     shortcut) install_shortcut ;;
     tools)
         shift

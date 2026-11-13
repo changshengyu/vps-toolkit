@@ -2,3 +2,4 @@
 deploy-preview/
 deploy.env
 state.env
+__pycache__/

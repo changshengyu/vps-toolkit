@@ -1,0 +1,71 @@
+name: vps-toolkit-monitor
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "5m"
+    max-file: "2"
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.16.0
+    network_mode: host
+    restart: unless-stopped
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.35
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+      - --web.listen-address=127.0.0.1:9090
+      - --auto-gomemlimit.ratio=0.8
+      - --query.max-concurrency=2
+      - --query.max-samples=1000000
+      - --query.timeout=15s
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:13.3.1
+    network_mode: host
+    restart: unless-stopped
+    mem_limit: 192m
+    memswap_limit: 192m
+    cpus: 0.25
+    environment:
+      GOMEMLIMIT: 128MiB
+      GOMAXPROCS: "1"
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    logging: *logging
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.12.1
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    mem_limit: 48m
+    memswap_limit: 48m
+    cpus: 0.10
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=127.0.0.1:9100
+    volumes:
+      - /:/host:ro,rslave
+    logging: *logging
+
+volumes:
+  prometheus-data:
+  grafana-data:

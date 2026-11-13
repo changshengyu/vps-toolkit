@@ -1,0 +1,20 @@
+name: Monitoring checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  monitoring:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
+      - name: Monitoring regression tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Prometheus configuration
+        run: >-
+          docker run --rm --entrypoint /bin/promtool
+          --mount type=bind,src=${{ github.workspace }}/templates/monitoring/prometheus,dst=/etc/prometheus,readonly
+          prom/prometheus:v3.16.0 check config /etc/prometheus/prometheus.yml
