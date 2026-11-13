@@ -33,9 +33,9 @@ services:
     image: grafana/grafana:13.3.1
     network_mode: host
     restart: unless-stopped
-    mem_limit: 192m
-    memswap_limit: 192m
-    cpus: 0.25
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.50
     environment:
       GOMEMLIMIT: 128MiB
       GOMAXPROCS: "1"

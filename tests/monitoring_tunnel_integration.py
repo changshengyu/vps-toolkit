@@ -18,6 +18,8 @@ import uuid
 
 from test_monitoring_tunnel import cf, FakeAPI, CONNECTOR
 from test_monitoring import ROOT
+from test_monitoring_grafana import grafana
+from unittest.mock import patch
 
 
 def run(*args):
@@ -49,12 +51,10 @@ def main():
                         "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                         cf.IMAGE, *connector["command"][:-2], "--help")
         assert "--token-file" in help_text
-        # Isolate URL/cookie behavior from the compact trial budget: startup at
-        # 192 MiB can restart on amd64. This is not a VPS capacity benchmark.
-        # Only the disposable test changes resources and the listen address.
+        # Exercise the production 256 MiB / 0.5 CPU budget. Only this disposable
+        # fixture changes the listen address so Docker can publish it locally.
         test_file = directory / "test.json"
         test_file.write_text(json.dumps({"services": {"grafana": {
-            "mem_limit": "256m", "memswap_limit": "256m", "cpus": 1.0,
             "network_mode": "bridge", "ports": ["127.0.0.1::3000"],
             "environment": {"GF_SERVER_HTTP_ADDR": "0.0.0.0", "GF_PLUGINS_PREINSTALL_DISABLED": "true",
                             "GF_ANALYTICS_CHECK_FOR_UPDATES": "false", "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES": "false"}
@@ -62,6 +62,7 @@ def main():
         active_test = active + ["-f", str(test_file)]
         plain_test = base + ["-f", str(test_file)]
         client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        login = "admin"
         password = (directory / ".env").read_text().strip().split("=", 1)[1]
 
         def endpoint(command):
@@ -71,7 +72,7 @@ def main():
         def request(url, data=None):
             headers = {"Host": "monitor.example.com", "X-Forwarded-Proto": "https"}
             if url.endswith("/api/frontend/settings"):
-                headers["Authorization"] = "Basic " + base64.b64encode(("admin:" + password).encode()).decode()
+                headers["Authorization"] = "Basic " + base64.b64encode((login + ":" + password).encode()).decode()
             if data is not None:
                 headers["Content-Type"] = "application/json"
                 data = json.dumps(data).encode()
@@ -100,19 +101,35 @@ def main():
             wait(address)
             with request(address + "/api/frontend/settings") as response:
                 assert json.load(response)["appUrl"] == "https://monitor.example.com/"
-            with request(address + "/login", {"user": "admin", "password": password}) as response:
+            with request(address + "/login", {"user": login, "password": password}) as response:
                 cookies = response.headers.get_all("Set-Cookie")
                 assert any("grafana_session=" in cookie and "; Secure" in cookie for cookie in cookies), cookies
-            # Pause removes only the override; the same database and password survive.
+            # Change the real existing account, not the bootstrap .env values.
+            new_password = secrets.token_urlsafe(24) + '"中文'
+            with patch.object(grafana, "ORIGIN", address):
+                grafana.change(directory, login, password, "monitor-admin", new_password)
+            old_password = password
+            login, password = "monitor-admin", new_password
+            try:
+                request(address + "/login", {"user": "admin", "password": old_password})
+                raise AssertionError("old credentials still work")
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 401
+            # Apply a persistent resources override, then pause the domain mode.
+            grafana.resources(directory, 256)
+            resource = ["-f", str(directory / "compose.grafana.yaml")]
+            active_test = active + resource + ["-f", str(test_file)]
+            plain_test = base + resource + ["-f", str(test_file)]
+            # Pause removes only the domain override; the updated login survives.
             run(*plain_test, "up", "-d", "--no-deps", "grafana")
             address = endpoint(plain_test)
             wait(address)
             with request(address + "/api/frontend/settings") as response:
                 assert json.load(response)["appUrl"] == "http://localhost:3000/"
-            with request(address + "/login", {"user": "admin", "password": password}) as response:
+            with request(address + "/login", {"user": login, "password": password}) as response:
                 cookies = response.headers.get_all("Set-Cookie")
                 assert any("grafana_session=" in cookie and "; Secure" not in cookie for cookie in cookies), cookies
-            print("PASS: Compose merge, cloudflared token-file CLI, HTTPS root URL + Secure cookie, SSH fallback and preserved login")
+            print("PASS: production Grafana budget, account rename/password API, rejected old login, HTTPS cookie, persistent resources and SSH fallback")
         except Exception:
             print(run(*active_test, "logs", "--tail=2000", "grafana"))
             raise
