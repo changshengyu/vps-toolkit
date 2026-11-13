@@ -32,7 +32,7 @@ CODE
 exit "${MENU_ACTION_EXIT:-0}"
 '''
         for name in ("deploy.sh", "monitor.sh", "3x-ui.sh", "xui-routing.sh", "xui-geodata.sh",
-                     "hy2-port-hopping.sh", "ipv6.sh", "vps-tools.sh"):
+                     "hy2-port-hopping.sh", "ipv6.sh", "vps-tools.sh", "sni-site.sh"):
             (self.repo / "scripts" / name).write_text(stub)
         denied = self.path / "bin"
         denied.mkdir()
@@ -115,6 +115,18 @@ exit "${MENU_ACTION_EXIT:-0}"
                 self.assertEqual([(r["script"], r["args"]) for r in self.records()], [(script, args)])
                 if script == "hy2-port-hopping.sh" and args == ["install"]:
                     self.assertEqual((self.records()[0]["port"], self.records()[0]["range"]), ("8443", "10000:20000"))
+
+    def test_sni_site_menu_dispatch_and_cli_preserve_existing_main_numbers(self):
+        routes = {(1,): 'install', (2,): 'access', (3,): 'check', (4,): 'page', (5,): 'logs',
+                  (6, 1): 'start', (6, 2): 'stop', (6, 3): 'restart', (6, 4): 'uninstall'}
+        for path, action in routes.items():
+            self.calls.unlink(missing_ok=True)
+            result = self.run_menu('8\n' + '\n'.join(map(str, path)) + '\n\nq\n')
+            self.assertEqual([(r['script'], r['args']) for r in self.records()], [('sni-site.sh', [action])])
+            self.assertIn('7. 监控管理', result.stdout)
+        self.calls.unlink()
+        self.run_menu('', 'sni-site', 'check')
+        self.assertEqual(self.records()[0]['args'], ['check'])
 
     def test_home_unwinds_nested_menus_without_running_commands(self):
         result = self.run_menu("2\n4\nm\nq\n")

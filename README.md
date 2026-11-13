@@ -14,6 +14,7 @@
 | 3x-ui 面板 | `3x-ui` | 运行 [3x-ui](https://github.com/MHSanaei/3x-ui) 官方安装脚本，详见[文档](docs/3x-ui.md) |
 | 多 VPS 监控 | `monitor` | 集中端 Prometheus + Grafana、节点端 Node Exporter，HTTPS 双向证书认证、源 IP 限制，详见[文档](docs/monitoring.md) |
 | 监控备份与恢复 | `monitor backup-setup` | 加密后自动发送配置和 Grafana 数据到 Telegram，支持全新监控机恢复，详见[文档](docs/monitoring-backup.md) |
+| ISP HTTPS 静态站点 | `sni-site` | 给其他 VPS 的 Reality 提供 target/SNI，公开证书自动续签，仅 TCP 443，详见[文档](docs/sni-site.md) |
 | IPv6 开关 | `ipv6` | 查看 / 开启 / 关闭系统 IPv6，重启后保持；纯 IPv6 机器不允许关闭 |
 | VPS 多功能工具箱 | `tools` | 运行 [vps_scripts](https://github.com/everett7623/vps_scripts) |
 
