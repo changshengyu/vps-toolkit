@@ -54,6 +54,7 @@ show_help() {
   result                     查看上次部署结果
   ipv6 status|enable|disable 查看 / 开启 / 关闭系统 IPv6
   monitor [操作]             管理 Prometheus / Grafana 监控（help 查看操作）
+  sni-site [操作]            ISP HTTPS 静态站点 / Reality SNI（help 查看操作）
   shortcut                   安装快捷命令 vt
   tools [上游参数]           运行 VPS 多功能工具箱
   help                       显示帮助
@@ -606,6 +607,53 @@ system_menu() {
     done
 }
 
+sni_services_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / ISP HTTPS 静态站点 / 服务管理"
+        info "  停止站点会影响使用此域名的 Reality 目标；卸载保留页面和证书。"
+        menu_items "静态站点服务" "启动（开机自启）" "停止（取消自启）" "重启" "卸载服务（保留配置）"
+        menu_navigation
+        read_choice 4
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/sni-site.sh" start ;;
+            2) run bash "$ROOT_DIR/scripts/sni-site.sh" stop ;;
+            3) run bash "$ROOT_DIR/scripts/sni-site.sh" restart ;;
+            4) run bash "$ROOT_DIR/scripts/sni-site.sh" uninstall ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+sni_site_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / ISP HTTPS 静态站点"
+        info "  在 ISP 机器部署；其他 VPS 使用它的域名作为 Reality target/SNI。"
+        info "  仅 TCP 443，证书自动续签；域名需灰云直连本机。"
+        menu_items "ISP HTTPS 静态站点（Reality SNI）" \
+            "部署 / 恢复 HTTPS 静态站点" \
+            "查看地址与 Reality 填写方法" \
+            "检查服务 / 证书 / TLS 1.3 / HTTP2" \
+            "替换首页 HTML（无需重启）" \
+            "查看站点日志" \
+            "服务管理（启动 / 停止 / 卸载）>"
+        menu_navigation
+        read_choice 6
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/sni-site.sh" install ;;
+            2) run bash "$ROOT_DIR/scripts/sni-site.sh" access ;;
+            3) run bash "$ROOT_DIR/scripts/sni-site.sh" check ;;
+            4) run bash "$ROOT_DIR/scripts/sni-site.sh" page ;;
+            5) run bash "$ROOT_DIR/scripts/sni-site.sh" logs ;;
+            6) sni_services_menu; continue ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 main_menu() {
     while true; do
         MENU_HOME=0
@@ -617,9 +665,10 @@ main_menu() {
             "系统设置（IPv6）>" \
             "VPS 多功能工具箱" \
             "使用帮助 / 快捷命令 >" \
-            "监控管理（Prometheus + Grafana）>"
+            "监控管理（Prometheus + Grafana）>" \
+            "ISP HTTPS 静态站点（Reality SNI）>"
         menu_navigation 退出
-        read_choice 7
+        read_choice 8
         case "$CHOICE" in
             1) deploy_menu ;;
             2) xui_menu ;;
@@ -628,6 +677,7 @@ main_menu() {
             5) run bash "$ROOT_DIR/scripts/vps-tools.sh"; pause ;;
             6) help_menu ;;
             7) monitor_menu ;;
+            8) sni_site_menu ;;
             0) if [ "$MENU_HOME" -eq 1 ]; then continue; fi; exit 0 ;;
             *) warn "无效选项：$CHOICE" ;;
         esac
@@ -653,6 +703,15 @@ case "${1:-menu}" in
             if [ "$MENU_HOME" -eq 1 ]; then main_menu; fi
         else
             bash "$ROOT_DIR/scripts/monitor.sh" "$@"
+        fi
+        ;;
+    sni-site)
+        shift
+        if [ "$#" -eq 0 ]; then
+            sni_site_menu
+            if [ "$MENU_HOME" -eq 1 ]; then main_menu; fi
+        else
+            bash "$ROOT_DIR/scripts/sni-site.sh" "$@"
         fi
         ;;
     shortcut) install_shortcut ;;

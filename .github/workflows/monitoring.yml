@@ -20,6 +20,8 @@ jobs:
           docker run --rm --entrypoint /bin/promtool
           --mount type=bind,src=${{ github.workspace }}/templates/monitoring/prometheus,dst=/etc/prometheus,readonly
           prom/prometheus:v3.16.0 check config /etc/prometheus/prometheus.yml
+      - name: ISP HTTPS static site TLS 1.3 and HTTP2
+        run: python3 tests/sni_site_integration.py
       - name: HTTPS mTLS with real exporter and Prometheus
         run: python3 tests/monitoring_https_integration.py
       - name: One-off SSH provisioning with real sshd

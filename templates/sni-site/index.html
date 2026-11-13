@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="记录阅读、生活与日常灵感的个人小站。">
+  <title>__SITE_TITLE__</title>
+  <style>
+    :root{color-scheme:light;--paper:#f6f4ee;--ink:#252d28;--muted:#69736a;--line:#d9dfd5;--green:#3f634c}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.8 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+    a{color:inherit;text-decoration:none}a:hover{color:var(--green)}.wrap{max-width:1020px;margin:auto;padding:0 32px}
+    header{display:flex;justify-content:space-between;align-items:center;padding:30px 0;border-bottom:1px solid var(--line)}.brand{font-weight:650;letter-spacing:.08em}nav{display:flex;gap:26px;font-size:14px;color:var(--muted)}
+    .hero{padding:100px 0 84px;max-width:760px}.eyebrow{color:var(--green);font-size:12px;letter-spacing:.18em;text-transform:uppercase}h1{font-family:Georgia,"Songti SC",serif;font-weight:400;font-size:clamp(38px,6vw,68px);line-height:1.3;letter-spacing:-.03em;margin:20px 0 26px}.lead{color:var(--muted);max-width:500px;font-size:18px}
+    .notes{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;padding:0 0 80px}.note{border-top:2px solid var(--line);padding-top:22px}.number{font-size:12px;color:var(--muted)}h2{font-family:Georgia,"Songti SC",serif;font-size:23px;font-weight:400;margin:15px 0 12px}.note p{font-size:14px;color:var(--muted);margin:0}
+    .about{border-top:1px solid var(--line);padding:40px 0 60px;display:grid;grid-template-columns:1fr 2fr;gap:32px}.about h2{margin:0}.about p{color:var(--muted);margin:0;max-width:550px}footer{border-top:1px solid var(--line);padding:22px 0 30px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between}
+    @media(max-width:650px){.wrap{padding:0 24px}.hero{padding:68px 0 56px}.notes{grid-template-columns:1fr;gap:30px;padding-bottom:54px}.about{grid-template-columns:1fr;gap:20px}nav{gap:18px}.lead{font-size:16px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header><a class="brand" href="#">__SITE_TITLE__</a><nav aria-label="站点导航"><a href="#notes">手记</a><a href="#about">关于</a></nav></header>
+    <main>
+      <section class="hero"><div class="eyebrow">A quiet corner of the web</div><h1>让日常的灵感，<br>有一处停留。</h1><p class="lead">记录阅读中的片刻领悟，也收集生活里那些微小而值得留意的事物。</p></section>
+      <section class="notes" id="notes" aria-label="手记分类">
+        <article class="note"><span class="number">01 / 阅读</span><h2>留一点时间给书页</h2><p>把喜欢的句子留下，也给自己的思考留出空白。阅读的意义，常常藏在合上书后的那一刻。</p></article>
+        <article class="note"><span class="number">02 / 生活</span><h2>发现身边的小风景</h2><p>窗边的光、路上的树影、一杯慢慢变凉的茶。平常的日子里，也有值得认真收藏的细节。</p></article>
+        <article class="note"><span class="number">03 / 随想</span><h2>写下还未成形的想法</h2><p>不急着给每个问题一个答案。先记录，再整理，让零散的念头慢慢找到它们之间的联系。</p></article>
+      </section>
+      <section class="about" id="about"><h2>关于这个小站</h2><p>这里是一处安静整理想法的地方。保留好奇，认真生活，偶尔停下来，看看自己走过的路。</p></section>
+    </main>
+    <footer><span>__SITE_TITLE__</span><span>Keep a little room for curiosity.</span></footer>
+  </div>
+</body>
+</html>
