@@ -108,7 +108,7 @@ def main():
                 assert any("grafana_session=" in cookie and "; Secure" not in cookie for cookie in cookies), cookies
             print("PASS: Compose merge, cloudflared token-file CLI, HTTPS root URL + Secure cookie, SSH fallback and preserved login")
         except Exception:
-            print(run(*active_test, "logs", "--tail=100", "grafana"))
+            print(run(*active_test, "logs", "--tail=2000", "grafana"))
             raise
         finally:
             run(*active_test, "down", "--volumes", "--remove-orphans")
