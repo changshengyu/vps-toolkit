@@ -62,11 +62,11 @@ class MonitoringTests(MonitoringFixture):
     def test_new_menu_entry_preserves_existing_numbers(self):
         r = subprocess.run(["bash", str(ROOT / "vps.sh")], input="7\n0\n0\n",
                            text=True, capture_output=True, env=self.env, check=True)
-        self.assertIn("6. 安装快捷命令 vt", r.stdout)
+        self.assertIn("6. 使用帮助 / 快捷命令 >", r.stdout)
         self.assertIn("7. 监控管理", r.stdout)
         self.assertIn("1. 安装监控机", r.stdout)
         self.assertIn("2. 添加 / 部署被监控节点", r.stdout)
-        self.assertIn("3. 面板访问（域名 / SSH）>", r.stdout)
+        self.assertIn("3. Grafana 面板（访问 / 账号 / 诊断）>", r.stdout)
 
     def test_rejects_path_traversal_and_config_injection(self):
         self.shell('''

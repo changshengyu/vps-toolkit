@@ -61,7 +61,8 @@ HELP
 }
 
 RESULT_FILE="${RESULT_FILE:-/root/vps-deploy-result.txt}"
-SHORTCUT="/usr/local/bin/vt"
+SHORTCUT="${VPS_TOOLKIT_SHORTCUT:-/usr/local/bin/vt}"
+MENU_HOME=0
 REPO_RAW_SCRIPT="https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh"
 
 # 终端支持时输出颜色
@@ -106,23 +107,25 @@ status_result() {
 }
 
 pause() {
+    local answer
     printf '\n'
-    read -r -p "按回车返回菜单..." _ || exit 0
+    read -r -p "回车继续；m 回主菜单；q 退出: " answer || exit 0
+    case "$answer" in m|M) MENU_HOME=1 ;; q|Q) exit 0 ;; esac
 }
 
 # 运行子脚本，失败时提示并返回菜单
 run() {
-    "$@" || warn "操作未完成（退出码 $?）。"
+    ( "$@" ) || warn "操作未完成（退出码 $?）。"
 }
 
 hy2_install_prompt() {
     local answer
 
-    read -r -p "Hysteria2 端口 [443]: " answer
+    read -r -p "Hysteria2 端口 [443]: " answer || return 1
     HY2_PORT="${answer:-443}"
-    read -r -p "跳跃端口范围 [20000-20100]: " answer
+    read -r -p "跳跃端口范围 [20000-20100]: " answer || return 1
     HOP_RANGE="${answer:-20000-20100}"
-    read -r -p "网卡名 [自动检测]: " answer
+    read -r -p "网卡名 [自动检测]: " answer || return 1
     IFACE="${answer:-}"
 
     HY2_PORT="$HY2_PORT" HOP_RANGE="$HOP_RANGE" IFACE="$IFACE" \
@@ -131,7 +134,7 @@ hy2_install_prompt() {
 
 geodata_custom() {
     local cron
-    read -r -p "cron 表达式（按服务器时区，通常为 UTC）[0 20 * * *]: " cron
+    read -r -p "cron 表达式（按服务器时区，通常为 UTC）[0 20 * * *]: " cron || return 1
     bash "$ROOT_DIR/scripts/xui-geodata.sh" "${cron:-0 20 * * *}"
 }
 
@@ -158,15 +161,89 @@ SCRIPT
     info "已安装快捷命令：输入 vt 打开菜单，也可以直接带参数，如 vt deploy --config-only。"
 }
 
-# 菜单标题和状态栏
+# Menu summaries read local state only; never source .env or query external APIs.
+status_monitor_role() {
+    if [ -f "${MONITOR_DIR:-/opt/vps-toolkit-monitor}/.vps-toolkit-managed" ]; then
+        printf '监控机'
+    elif [ -f "/usr/local/lib/vps-toolkit-monitor/.vps-toolkit-managed" ]; then
+        printf '被监控节点'
+    else
+        printf '未部署监控'
+    fi
+}
+
+status_shortcut() {
+    if [ -f "$SHORTCUT" ] && grep -q 'vps-toolkit' "$SHORTCUT" 2>/dev/null; then
+        if [ -x "$SHORTCUT" ]; then printf '已安装，输入 vt'; else printf '需重新安装（6 → 1）'; fi
+    elif [ -e "$SHORTCUT" ]; then
+        printf 'vt 名称已被其他程序占用'
+    else
+        printf '未安装（6 → 1）'
+    fi
+}
+
+machine_summary() {
+    local os_name host_name
+    host_name="$(hostname 2>/dev/null || printf '未知')"
+    os_name="$(uname -s 2>/dev/null || printf '未知')"
+    if [ -r /etc/os-release ]; then
+        os_name="$(awk -F= '$1 == "PRETTY_NAME" {sub(/^[^=]*=/, ""); gsub(/^"|"$/, ""); print; exit}' /etc/os-release)"
+    fi
+    printf '  主机：%s  系统：%s  架构：%s\n' "$host_name" "$os_name" "$(uname -m)"
+    if [ -r /proc/meminfo ]; then
+        awk '/^MemTotal:/ {total=$2} /^MemAvailable:/ {available=$2}
+            END {if (total) printf "  内存可用：%.0f / %.0f MiB", available/1024, total/1024}' /proc/meminfo
+        printf '  时区：%s\n' "$(date +%Z)"
+    fi
+    if [ -r /proc/uptime ]; then
+        awk '{n=int($1); printf "  已运行：%d 天 %d 小时 %d 分钟\n", n/86400, (n%86400)/3600, (n%3600)/60}' /proc/uptime
+    fi
+}
+
+configured_panel_summary() {
+    local directory="${MONITOR_DIR:-/opt/vps-toolkit-monitor}" domain=""
+    if [ -r "$directory/tunnel/state.json" ] && command -v jq >/dev/null 2>&1; then
+        domain="$(jq -r 'select(.configured == true) | .domain // empty' "$directory/tunnel/state.json" 2>/dev/null || true)"
+    fi
+    if [[ "$domain" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$ ]]; then
+        if [ -f "$directory/compose.tunnel.yaml" ]; then
+            printf '  Grafana 配置入口：https://%s/（健康状态见监控菜单）\n' "$domain"
+        else
+            printf '  Grafana 域名：https://%s/（入口已暂停）\n' "$domain"
+        fi
+    fi
+}
+
+opening_commands() {
+    printf '  在线打开（可复制）：\n'
+    printf 'bash <(curl -fsSL %s)\n' "$REPO_RAW_SCRIPT"
+    printf '  快捷命令：%s\n' "$(status_shortcut)"
+    printf '  常用命令（安装 vt 后）：vt monitor  |  vt help\n'
+}
+
 menu_header() {
+    local location="${1:-主菜单}"
+    if [ "$location" != 主菜单 ]; then
+        printf '\n%s  当前位置：%s%s\n' "$C_BOLD" "$location" "$C_RESET"
+        return 0
+    fi
     cat <<HEAD
 
 ${C_BOLD}╔══════════════════════════════════════════════╗
 ║                 vps-toolkit                  ║
 ╚══════════════════════════════════════════════╝${C_RESET}
-  3x-ui：$(status_xui)  端口跳跃：$(status_hop)  IPv6：$(status_ipv6)  部署结果：$(status_result)
 HEAD
+    machine_summary
+    printf '  3x-ui：%s  端口跳跃：%s  IPv6：%s  部署结果：%s\n' "$(status_xui)" "$(status_hop)" "$(status_ipv6)" "$(status_result)"
+    printf '  监控角色：%s\n' "$(status_monitor_role)"
+    configured_panel_summary
+    printf '\n'
+    opening_commands
+    printf '  更新菜单：退出后重新打开；已打开的菜单不会自动更新。\n'
+}
+
+menu_navigation() {
+    printf '  %s0.%s %s  |  m. 主菜单  |  q. 退出\n' "$C_GREEN" "$C_RESET" "${1:-返回上级}"
 }
 
 # 打印编号选项：menu_items "标题" "选项1" "选项2" ...（0 由调用方决定是“返回”还是“退出”）
@@ -182,27 +259,32 @@ menu_items() {
 
 # 读取选项；输入结束（Ctrl+D）时退出
 read_choice() {
-    read -r -p "$(printf '\n请输入选项 [0-%s]: ' "$1")" CHOICE || exit 0
+    read -r -p "$(printf '\n请输入选项 [0-%s / m / q]: ' "$1")" CHOICE || exit 0
+    case "$CHOICE" in
+        q|Q) exit 0 ;;
+        m|M) MENU_HOME=1; CHOICE=0 ;;
+    esac
     printf '\n'
 }
 
 deploy_menu() {
-    while true; do
-        menu_header
-        menu_items "节点部署" \
-            "一键部署节点" \
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 节点部署与更新"
+        info "  首次先预览，再正式部署；已有机器更新出站和路由请选择 3。"
+        menu_items "节点部署与更新" \
             "预览部署配置（不改动系统）" \
-            "重新部署（覆盖已有的同端口入站）" \
-            "旧机器只更新配置（出站、路由、geodata）" \
+            "一键部署节点" \
+            "更新现有节点配置（不改入站）" \
+            "重新部署并覆盖同端口入站" \
             "查看部署结果（面板地址、分享链接）"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        menu_navigation
         read_choice 5
         case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/deploy.sh" ;;
-            2) run bash "$ROOT_DIR/scripts/deploy.sh" --dry-run ;;
-            3) run bash "$ROOT_DIR/scripts/deploy.sh" --replace ;;
-            4) run bash "$ROOT_DIR/scripts/deploy.sh" --config-only ;;
-            5) show_result ;;
+            1) run bash "$ROOT_DIR/scripts/deploy.sh" --dry-run ;;
+            2) run bash "$ROOT_DIR/scripts/deploy.sh" ;;
+            3) run bash "$ROOT_DIR/scripts/deploy.sh" --config-only ;;
+            4) run bash "$ROOT_DIR/scripts/deploy.sh" --replace ;;
+            5) run show_result ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac
@@ -211,12 +293,14 @@ deploy_menu() {
 }
 
 geodata_menu() {
-    while true; do
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 3x-ui 面板 / geodata 更新"
+        info "  定时任务按服务器时区执行，当前时区：$(date +%Z)。"
         menu_items "geodata 自动更新（geoip.dat、geosite.dat）" \
-            "开启自动更新（每天北京时间 04:00）" \
+            "开启自动更新（服务器时间每天 20:00）" \
             "自定义更新时间" \
             "关闭自动更新"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        menu_navigation
         read_choice 3
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/xui-geodata.sh" ;;
@@ -230,14 +314,14 @@ geodata_menu() {
 }
 
 xui_menu() {
-    while true; do
-        menu_header
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 3x-ui 面板"
         menu_items "3x-ui 面板" \
             "安装 3x-ui" \
             "查看 3x-ui 状态" \
             "路由域策略改为 IPIfNonMatch" \
             "geodata 自动更新 >"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        menu_navigation
         read_choice 4
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/3x-ui.sh" install ;;
@@ -252,13 +336,13 @@ xui_menu() {
 }
 
 hy2_menu() {
-    while true; do
-        menu_header
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / Hysteria2 端口跳跃"
         menu_items "Hysteria2 端口跳跃" \
             "安装或更新规则" \
             "查看状态" \
             "卸载"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        menu_navigation
         read_choice 3
         case "$CHOICE" in
             1) run hy2_install_prompt ;;
@@ -276,21 +360,21 @@ hy2_menu() {
 }
 
 monitor_nodes_menu() {
-    while true; do
-        menu_items "节点管理 / 手动接入" \
-            "添加或重新部署节点（自动流程）" \
-            "移除节点采集" \
-            "本机手动安装采集器（需证书包）" \
-            "手动生成节点证书包" \
-            "验证并接入已安装的节点"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
-        read_choice 5
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / 节点与证书"
+        info "  新增或重新部署节点：返回监控管理选择 2。"
+        menu_items "节点与证书" \
+            "查看节点证书有效期" \
+            "续签并同步远端节点证书" \
+            "续签监控机客户端证书" \
+            "移除节点采集（保留远端服务与历史）"
+        menu_navigation
+        read_choice 4
         case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" remove-node ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" node-install ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" prepare-node ;;
-            5) run bash "$ROOT_DIR/scripts/monitor.sh" add-node ;;
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" cert-status ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" renew-node ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew client ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" remove-node ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac
@@ -298,20 +382,36 @@ monitor_nodes_menu() {
     done
 }
 
-monitor_certs_menu() {
-    while true; do
-        menu_items "证书管理" \
-            "查看有效期" \
-            "续签并同步远端节点证书" \
-            "续签监控机客户端证书" \
-            "只生成手动安装包（高级）"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
-        read_choice 4
+monitor_manual_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / 高级手动接入"
+        info "  手动顺序：监控机生成包 → 被监控机安装 → 监控机验证接入。"
+        menu_items "高级手动接入（自行传输证书包）" \
+            "生成节点证书包（在监控机）" \
+            "安装采集器和证书包（在被监控机）" \
+            "验证并接入已安装的节点（在监控机）"
+        menu_navigation
+        read_choice 3
         case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" cert-status ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" renew-node ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew client ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew ;;
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" prepare-node ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" node-install ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" add-node ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+monitor_status_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / 状态与日志"
+        menu_items "状态与日志" "查看服务、节点与资源占用" "查看监控日志"
+        menu_navigation
+        read_choice 2
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac
@@ -320,10 +420,11 @@ monitor_certs_menu() {
 }
 
 monitor_services_menu() {
-    while true; do
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / 服务管理"
         menu_items "监控服务管理（本机）" \
             "启动" "停止" "重启" "卸载服务（保留数据）"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        menu_navigation
         read_choice 4
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" start ;;
@@ -338,30 +439,48 @@ monitor_services_menu() {
 }
 
 monitor_access_menu() {
-    while true; do
-        menu_header
-        menu_items "面板访问（Cloudflare Tunnel / SSH）" \
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / Grafana 面板"
+        info "  域名入口在监控管理第 4 项；这里管理登录和面板本身。"
+        menu_items "Grafana 面板" \
+            "查看面板地址与 SSH 访问方法" \
+            "修改登录账号 / 密码" \
+            "检查面板健康（502 / 无法连接）" \
+            "调整 Grafana 资源 / 修复启动"
+        menu_navigation
+        read_choice 4
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-account ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-check ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-resources ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+monitor_tunnel_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / Cloudflare 域名入口"
+        info "  入口转发到本机 Grafana；无需开放公网 3000 或占用 80/443。"
+        menu_items "Cloudflare 域名入口" \
             "配置 Grafana 域名入口（自动创建 Tunnel）" \
-            "查看面板地址和 SSH 访问方法" \
             "查看域名入口状态" \
             "查看域名入口日志" \
-            "暂停域名入口，恢复 SSH 访问" \
             "恢复域名入口" \
-            "移除域名入口（保留监控数据）" \
-            "修改 Grafana 登录账号 / 密码" \
-            "调整 Grafana 资源 / 修复启动"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
-        read_choice 9
+            "暂停域名入口，恢复 SSH 访问" \
+            "移除域名入口（保留监控数据）"
+        menu_navigation
+        read_choice 6
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-setup ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-status ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-logs ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-status ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-logs ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-start ;;
             5) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-stop ;;
-            6) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-start ;;
-            7) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-remove ;;
-            8) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-account ;;
-            9) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-resources ;;
+            6) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-remove ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac
@@ -370,28 +489,28 @@ monitor_access_menu() {
 }
 
 monitor_menu() {
-    while true; do
-        menu_header
-        printf '  首次部署：在监控机依次选择 1 → 2 → 3；以后添加节点只需选 2。\n'
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理"
+        info "  首次：1 安装监控机 → 2 添加节点 → 3 查看面板；配置 HTTPS 域名进入 4。"
         menu_items "监控管理（Prometheus + Grafana）" \
             "安装监控机（首次，仅一台）" \
             "添加 / 部署被监控节点（自动流程）" \
-            "面板访问（域名 / SSH）>" \
-            "查看状态和资源占用" \
-            "查看日志" \
-            "节点管理 / 手动接入 >" \
-            "证书管理 >" \
+            "Grafana 面板（访问 / 账号 / 诊断）>" \
+            "Cloudflare 域名入口 >" \
+            "状态与日志 >" \
+            "节点与证书 >" \
+            "高级手动接入 >" \
             "启动 / 停止 / 重启 / 卸载 >"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        menu_navigation
         read_choice 8
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
             2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
             3) monitor_access_menu; continue ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
-            5) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
+            4) monitor_tunnel_menu; continue ;;
+            5) monitor_status_menu; continue ;;
             6) monitor_nodes_menu; continue ;;
-            7) monitor_certs_menu; continue ;;
+            7) monitor_manual_menu; continue ;;
             8) monitor_services_menu; continue ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
@@ -400,14 +519,46 @@ monitor_menu() {
     done
 }
 
+help_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 使用帮助与快捷命令"
+        opening_commands
+        menu_items "使用帮助与快捷命令" \
+            "安装 / 更新快捷命令 vt" \
+            "查看全部命令帮助" \
+            "查看常见操作路径"
+        menu_navigation
+        read_choice 3
+        case "$CHOICE" in
+            1) run install_shortcut ;;
+            2) show_help ;;
+            3)
+                cat <<'GUIDE'
+  新建代理节点：主菜单 1 → 1 预览 → 2 部署。
+  更新现有节点：主菜单 1 → 3 更新配置。
+  监控首次部署：主菜单 7 → 1 安装 → 2 添加节点。
+  配置面板域名：主菜单 7 → 4 → 1。
+  查看面板地址：主菜单 7 → 3 → 1。
+  修改面板账号：主菜单 7 → 3 → 2。
+  排查面板 502：主菜单 7 → 3 → 3；需要调整资源时选择 4。
+  所有菜单：0 返回上级，m 回主菜单，q 退出。
+GUIDE
+                ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 system_menu() {
-    while true; do
-        menu_header
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 系统设置 / IPv6"
         menu_items "系统设置" \
             "查看 IPv6 状态" \
             "开启 IPv6" \
             "关闭 IPv6"
-        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        menu_navigation
         read_choice 3
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/ipv6.sh" status ;;
@@ -426,6 +577,7 @@ system_menu() {
 
 main_menu() {
     while true; do
+        MENU_HOME=0
         menu_header
         menu_items "主菜单" \
             "节点部署 >" \
@@ -433,9 +585,9 @@ main_menu() {
             "Hysteria2 端口跳跃 >" \
             "系统设置（IPv6）>" \
             "VPS 多功能工具箱" \
-            "安装快捷命令 vt" \
+            "使用帮助 / 快捷命令 >" \
             "监控管理（Prometheus + Grafana）>"
-        printf '  %s0.%s 退出\n' "$C_GREEN" "$C_RESET"
+        menu_navigation 退出
         read_choice 7
         case "$CHOICE" in
             1) deploy_menu ;;
@@ -443,9 +595,9 @@ main_menu() {
             3) hy2_menu ;;
             4) system_menu ;;
             5) run bash "$ROOT_DIR/scripts/vps-tools.sh"; pause ;;
-            6) run install_shortcut; pause ;;
+            6) help_menu ;;
             7) monitor_menu ;;
-            0) exit 0 ;;
+            0) if [ "$MENU_HOME" -eq 1 ]; then continue; fi; exit 0 ;;
             *) warn "无效选项：$CHOICE" ;;
         esac
     done
@@ -467,6 +619,7 @@ case "${1:-menu}" in
         shift
         if [ "$#" -eq 0 ]; then
             monitor_menu
+            if [ "$MENU_HOME" -eq 1 ]; then main_menu; fi
         else
             bash "$ROOT_DIR/scripts/monitor.sh" "$@"
         fi
