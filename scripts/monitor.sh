@@ -227,7 +227,7 @@ show_access() {
 ssh -N -T -p SSH端口 -L 127.0.0.1:13000:127.0.0.1:3000 -L 127.0.0.1:19090:127.0.0.1:9090 用户名@监控机IP
 $grafana_access
 Prometheus：http://127.0.0.1:19090/targets
-修改登录信息：vt monitor grafana-account（面板访问菜单第 8 项）。
+修改登录信息：vt monitor grafana-account（监控管理 → 3 Grafana 面板 → 2）。
 安装时初始密码在 $MONITOR_DIR/.env；修改 .env 不会重置已有数据库密码。
 Mac 断开不影响采集。
 ACCESS
