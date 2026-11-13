@@ -17,8 +17,8 @@ PARAM_SPECS=(
     "ENABLE_AI_ROUTE|ai-route|AI 网站走六六云 SS 出站（y/n）|y|opt"
     "SS_ISP_ADDR|ss-addr|六六云 SS 地址||ai"
     "SS_ISP_PORT|ss-port|六六云 SS 端口||ai"
-    "SS_ISP_PASS|ss-pass|六六云 SS 密码||ai_secret"
     "SS_ISP_METHOD|ss-method|六六云 SS 加密方式|2022-blake3-aes-256-gcm|ai_opt"
+    "SS_ISP_PASS|ss-pass|六六云 SS 密码||ai_secret"
     "PANEL_PORT|panel-port|面板端口|@rand_port|opt"
     "PANEL_USER|panel-user|面板用户名|@rand_str10|opt"
     "PANEL_PASS|panel-pass|面板密码|@rand_str16|opt"
@@ -153,11 +153,40 @@ mask_value() {
     local v="$1"
     if [ -z "$v" ]; then
         printf '（空）'
-    elif [ "${#v}" -le 6 ]; then
-        printf '***'
+    elif [ "${#v}" -le 8 ]; then
+        printf '***（%s 位）' "${#v}"
     else
-        printf '%s***' "${v:0:3}"
+        printf '%s***%s（%s 位）' "${v:0:3}" "${v: -3}" "${#v}"
     fi
+}
+
+# SS2022 的密码是 base64 编码的固定长度密钥；多用户格式为 "服务端密钥:用户密钥"
+# 输出错误说明，正确时无输出
+check_ss_password() {
+    local pass="$1" method="$2" want part bytes
+    case "$method" in
+        2022-blake3-aes-128-gcm) want=16 ;;
+        2022-blake3-aes-256-gcm | 2022-blake3-chacha20-poly1305) want=32 ;;
+        *) return 0 ;;
+    esac
+    [ -n "$pass" ] || return 0
+    local IFS=':'
+    for part in $pass; do
+        if ! [[ "$part" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] ||
+            ! bytes="$(printf '%s' "$part" | base64 -d 2>/dev/null | wc -c)" ||
+            [ "$bytes" -ne "$want" ]; then
+            printf '%s 的密码应为 base64 编码的 %s 字节密钥（%s 个字符，以 = 结尾），当前输入 %s 个字符，可能复制不完整' \
+                "$method" "$want" "$(((want + 2) / 3 * 4))" "${#part}"
+            return 0
+        fi
+    done
+}
+
+# 单个参数的即时校验，输出错误说明
+check_param() {
+    case "$1" in
+        SS_ISP_PASS) check_ss_password "$2" "${SS_ISP_METHOD:-}" ;;
+    esac
 }
 
 is_required() {
@@ -229,8 +258,17 @@ collect_params() {
         if [ -z "$source" ] || [ "$ASK_ALL" = "1" ]; then
             [ -z "$value" ] && value="$(resolve_default "$def")"
             if [ "$INTERACTIVE" = "1" ] && { [ "$ASK_ALL" = "1" ] || { is_required "$kind" && [ -z "$value" ]; }; }; then
-                prompt_value "$var" "$desc" "$value" "$hidden"
-                value="${!var}"
+                local tries=0 problem
+                while :; do
+                    prompt_value "$var" "$desc" "$value" "$hidden"
+                    value="${!var}"
+                    problem="$(check_param "$var" "$value")"
+                    [ -z "$problem" ] && break
+                    warn "$problem"
+                    tries=$((tries + 1))
+                    [ "$tries" -lt 3 ] || die "多次输入不正确，已退出。"
+                    value=""
+                done
                 [ -n "$source" ] || source="交互输入"
             elif [ -z "$source" ]; then
                 if [[ "$def" == @* ]]; then source="自动生成"; else source="默认值"; fi
@@ -268,6 +306,9 @@ is_cron() {
 # --config-only 模式的校验
 validate_config_params() {
     local errors=()
+    local ss_problem=""
+    [ "${ENABLE_AI_ROUTE:-y}" = "y" ] && ss_problem="$(check_param SS_ISP_PASS "$SS_ISP_PASS")"
+    [ -z "$ss_problem" ] || errors+=("SS_ISP_PASS：$ss_problem")
     case "$ENABLE_AI_ROUTE" in y | n) ;; *) errors+=("ENABLE_AI_ROUTE 只能是 y 或 n：$ENABLE_AI_ROUTE") ;; esac
     if [ "$ENABLE_AI_ROUTE" = "y" ]; then
         is_port "$SS_ISP_PORT" || errors+=("SS_ISP_PORT 不是有效端口：$SS_ISP_PORT")
@@ -285,6 +326,9 @@ validate_config_params() {
 
 validate_params() {
     local errors=() p start end
+    local ss_problem=""
+    [ "${ENABLE_AI_ROUTE:-y}" = "y" ] && ss_problem="$(check_param SS_ISP_PASS "$SS_ISP_PASS")"
+    [ -z "$ss_problem" ] || errors+=("SS_ISP_PASS：$ss_problem")
 
     for p in REALITY_DOMAIN HY2_DOMAIN CDN_DOMAIN; do
         is_domain "${!p}" || errors+=("$p 不是有效域名：${!p}")

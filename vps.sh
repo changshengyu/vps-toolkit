@@ -52,6 +52,7 @@ show_help() {
   routing [策略]             修改 3x-ui 路由域策略（默认 IPIfNonMatch）
   geodata [cron|off]         开启 / 关闭 3x-ui 的 geodata 自动更新
   result                     查看上次部署结果
+  ipv6 status|enable|disable 查看 / 开启 / 关闭系统 IPv6
   shortcut                   安装快捷命令 vt
   tools [上游参数]           运行 VPS 多功能工具箱
   help                       显示帮助
@@ -84,6 +85,14 @@ status_hop() {
         printf '%s已启用%s' "$C_GREEN" "$C_RESET"
     else
         printf '%s未启用%s' "$C_YELLOW" "$C_RESET"
+    fi
+}
+
+status_ipv6() {
+    if [ ! -d /proc/sys/net/ipv6 ] || [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ]; then
+        printf '%s已关闭%s' "$C_YELLOW" "$C_RESET"
+    else
+        printf '%s已开启%s' "$C_GREEN" "$C_RESET"
     fi
 }
 
@@ -148,77 +157,169 @@ SCRIPT
     info "已安装快捷命令：输入 vt 打开菜单，也可以直接带参数，如 vt deploy --config-only。"
 }
 
-print_menu() {
-    cat <<MENU
+# 菜单标题和状态栏
+menu_header() {
+    cat <<HEAD
 
 ${C_BOLD}╔══════════════════════════════════════════════╗
 ║                 vps-toolkit                  ║
 ╚══════════════════════════════════════════════╝${C_RESET}
-  3x-ui：$(status_xui)    端口跳跃：$(status_hop)    部署结果：$(status_result)
-
-  ${C_BOLD}节点部署${C_RESET}
-  ${C_GREEN}1.${C_RESET}  一键部署节点
-  ${C_GREEN}2.${C_RESET}  预览部署配置（不改动系统）
-  ${C_GREEN}3.${C_RESET}  重新部署（覆盖已有的同端口入站）
-  ${C_GREEN}4.${C_RESET}  旧机器只更新配置（出站、路由、geodata）
-  ${C_GREEN}5.${C_RESET}  查看部署结果（面板地址、分享链接）
-
-  ${C_BOLD}3x-ui 面板${C_RESET}
-  ${C_GREEN}6.${C_RESET}  安装 3x-ui
-  ${C_GREEN}7.${C_RESET}  查看 3x-ui 状态
-  ${C_GREEN}8.${C_RESET}  路由域策略改为 IPIfNonMatch
-  ${C_GREEN}9.${C_RESET}  开启 geodata 自动更新（每天北京时间 04:00）
-  ${C_GREEN}10.${C_RESET} 自定义 geodata 更新时间
-  ${C_GREEN}11.${C_RESET} 关闭 geodata 自动更新
-
-  ${C_BOLD}Hysteria2 端口跳跃${C_RESET}
-  ${C_GREEN}12.${C_RESET} 安装或更新规则
-  ${C_GREEN}13.${C_RESET} 查看状态
-  ${C_GREEN}14.${C_RESET} 卸载
-
-  ${C_BOLD}其他${C_RESET}
-  ${C_GREEN}15.${C_RESET} VPS 多功能工具箱
-  ${C_GREEN}16.${C_RESET} 安装快捷命令 vt
-  ${C_GREEN}0.${C_RESET}  退出
-MENU
+  3x-ui：$(status_xui)  端口跳跃：$(status_hop)  IPv6：$(status_ipv6)  部署结果：$(status_result)
+HEAD
 }
 
-main_menu() {
-    local choice
+# 打印编号选项：menu_items "标题" "选项1" "选项2" ...（0 由调用方决定是“返回”还是“退出”）
+menu_items() {
+    local title="$1" i=1 item
+    shift
+    printf '\n  %s%s%s\n' "$C_BOLD" "$title" "$C_RESET"
+    for item in "$@"; do
+        printf '  %s%d.%s %s\n' "$C_GREEN" "$i" "$C_RESET" "$item"
+        i=$((i + 1))
+    done
+}
 
+# 读取选项；输入结束（Ctrl+D）时退出
+read_choice() {
+    read -r -p "$(printf '\n请输入选项 [0-%s]: ' "$1")" CHOICE || exit 0
+    printf '\n'
+}
+
+deploy_menu() {
     while true; do
-        print_menu
-        read -r -p "请输入选项 [0-16]: " choice || exit 0
-        printf '\n'
-
-        case "$choice" in
+        menu_header
+        menu_items "节点部署" \
+            "一键部署节点" \
+            "预览部署配置（不改动系统）" \
+            "重新部署（覆盖已有的同端口入站）" \
+            "旧机器只更新配置（出站、路由、geodata）" \
+            "查看部署结果（面板地址、分享链接）"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 5
+        case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/deploy.sh" ;;
             2) run bash "$ROOT_DIR/scripts/deploy.sh" --dry-run ;;
             3) run bash "$ROOT_DIR/scripts/deploy.sh" --replace ;;
             4) run bash "$ROOT_DIR/scripts/deploy.sh" --config-only ;;
             5) show_result ;;
-            6) run bash "$ROOT_DIR/scripts/3x-ui.sh" install ;;
-            7) run bash "$ROOT_DIR/scripts/3x-ui.sh" status ;;
-            8) run bash "$ROOT_DIR/scripts/xui-routing.sh" IPIfNonMatch ;;
-            9) run bash "$ROOT_DIR/scripts/xui-geodata.sh" ;;
-            10) run geodata_custom ;;
-            11) run bash "$ROOT_DIR/scripts/xui-geodata.sh" off ;;
-            12) run hy2_install_prompt ;;
-            13) run bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" status ;;
-            14)
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+geodata_menu() {
+    while true; do
+        menu_items "geodata 自动更新（geoip.dat、geosite.dat）" \
+            "开启自动更新（每天北京时间 04:00）" \
+            "自定义更新时间" \
+            "关闭自动更新"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 3
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/xui-geodata.sh" ;;
+            2) run geodata_custom ;;
+            3) run bash "$ROOT_DIR/scripts/xui-geodata.sh" off ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+xui_menu() {
+    while true; do
+        menu_header
+        menu_items "3x-ui 面板" \
+            "安装 3x-ui" \
+            "查看 3x-ui 状态" \
+            "路由域策略改为 IPIfNonMatch" \
+            "geodata 自动更新 >"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 4
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/3x-ui.sh" install ;;
+            2) run bash "$ROOT_DIR/scripts/3x-ui.sh" status ;;
+            3) run bash "$ROOT_DIR/scripts/xui-routing.sh" IPIfNonMatch ;;
+            4) geodata_menu; continue ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+hy2_menu() {
+    while true; do
+        menu_header
+        menu_items "Hysteria2 端口跳跃" \
+            "安装或更新规则" \
+            "查看状态" \
+            "卸载"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 3
+        case "$CHOICE" in
+            1) run hy2_install_prompt ;;
+            2) run bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" status ;;
+            3)
                 if confirm "确认卸载端口跳跃规则？"; then
                     run bash "$ROOT_DIR/scripts/hy2-port-hopping.sh" uninstall
                 fi
                 ;;
-            15) run bash "$ROOT_DIR/scripts/vps-tools.sh" ;;
-            16) run install_shortcut ;;
-            0) exit 0 ;;
-            *)
-                warn "无效选项：$choice"
-                continue
-                ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
         esac
         pause
+    done
+}
+
+system_menu() {
+    while true; do
+        menu_header
+        menu_items "系统设置" \
+            "查看 IPv6 状态" \
+            "开启 IPv6" \
+            "关闭 IPv6"
+        printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
+        read_choice 3
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/ipv6.sh" status ;;
+            2) run bash "$ROOT_DIR/scripts/ipv6.sh" enable ;;
+            3)
+                if confirm "关闭 IPv6 后，节点的 IPv6 地址将不可用。确认关闭？"; then
+                    run bash "$ROOT_DIR/scripts/ipv6.sh" disable
+                fi
+                ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+main_menu() {
+    while true; do
+        menu_header
+        menu_items "主菜单" \
+            "节点部署 >" \
+            "3x-ui 面板 >" \
+            "Hysteria2 端口跳跃 >" \
+            "系统设置（IPv6）>" \
+            "VPS 多功能工具箱" \
+            "安装快捷命令 vt"
+        printf '  %s0.%s 退出\n' "$C_GREEN" "$C_RESET"
+        read_choice 6
+        case "$CHOICE" in
+            1) deploy_menu ;;
+            2) xui_menu ;;
+            3) hy2_menu ;;
+            4) system_menu ;;
+            5) run bash "$ROOT_DIR/scripts/vps-tools.sh"; pause ;;
+            6) run install_shortcut; pause ;;
+            0) exit 0 ;;
+            *) warn "无效选项：$CHOICE" ;;
+        esac
     done
 }
 
@@ -233,6 +334,7 @@ case "${1:-menu}" in
     routing) bash "$ROOT_DIR/scripts/xui-routing.sh" "${2:-IPIfNonMatch}" ;;
     geodata) bash "$ROOT_DIR/scripts/xui-geodata.sh" "${2:-0 20 * * *}" ;;
     result) show_result ;;
+    ipv6) bash "$ROOT_DIR/scripts/ipv6.sh" "${2:-status}" ;;
     shortcut) install_shortcut ;;
     tools)
         shift
