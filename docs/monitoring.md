@@ -1,6 +1,6 @@
 # 多 VPS 监控：Prometheus + Grafana + HTTPS mTLS
 
-主菜单 **7 → 监控管理**，或运行 `vt monitor`。仅一台机器安装集中端，其他 VPS 只安装采集器。推荐在监控机依次选择 **1 安装监控机 → 2 自动添加节点 → 3 查看面板**。填节点域名和 SSH 登录信息后，签发证书、传输、远端安装及接入全部自动完成，无需手工传包。日常采集使用 HTTPS mTLS，部署完成后关闭 SSH 会话。
+主菜单 **7 → 监控管理**，或运行 `vt monitor`。仅一台机器安装集中端，其他 VPS 只安装采集器。推荐在监控机依次选择 **1 安装监控机 → 2 自动添加节点 → 3 面板访问**。填节点域名和 SSH 登录信息后，签发证书、传输、远端安装及接入全部自动完成，无需手工传包。日常采集使用 HTTPS mTLS，部署完成后关闭 SSH 会话。
 
 ## 组件与网络
 
@@ -8,11 +8,12 @@
 |---|---|
 | 集中监控机 | Docker Compose：Prometheus、Grafana、本机 Node Exporter |
 | 入口 VPS / ISP 落地机 | Node Exporter 二进制、systemd、独立 nftables 源 IP 规则 |
-| 本地 Mac | 通过 SSH 隧道打开 Grafana；不参与持续采集 |
+| 本地 Mac | 通过 HTTPS 域名或 SSH 隧道打开 Grafana；不参与持续采集 |
 
 ```text
 监控机 Prometheus ── HTTPS + 客户端证书 ──→ 节点直连域名:19100
-本地 Mac ── SSH 隧道 ──→ 监控机 Grafana
+浏览器 ── HTTPS ──→ Cloudflare ── 加密 Tunnel ──→ 监控机 Grafana
+本地 Mac ── SSH 隧道 ──→ 监控机 Grafana（备用）
 ```
 
 监控机验证节点证书链和 DNS / IP SAN；节点验证客户端证书、clientAuth 用途及监控身份 SAN。节点采集端口仅允许指定的监控机公网源 IP。支持直连域名、IPv4 或 IPv6。域名必须是指向对应 VPS 的 A/AAAA 记录（Cloudflare 灰云），不能使用 CDN 代理或多节点轮询。已有域名可直接使用：工具自动签发专用私有 CA 证书，不改现有网站证书，不需要 ACME 验证，也不需要释放 80/443。源 IP 是监控机的公网出口 IP，不是 Mac 的 IP。
@@ -74,22 +75,22 @@ SSH 私钥路径是**监控机本地**的路径，不是 Mac 路径。留空会�
 
 同一名称再次执行可更新域名、源 IP、SSH 信息，或为重装后的机器重新部署。以后增加新节点只重复第 2 项。
 
-### 3. 查看监控面板
+### 3. 配置 / 打开监控面板
 
-监控管理 → **3 查看面板访问方法**：
+监控管理 → **3 面板访问访问方法**：
 
 ```bash
 vt monitor access
 ```
 
-按提示在 Mac 建立查看面板的连接。操作完成后用第 4 项检查资源状态，第 5 项查看日志。
+域名入口配置完成后直接用浏览器打开打印出的 HTTPS 地址，不需要 Mac 保持 SSH。监控管理第 4 项检查资源状态，第 5 项查看日志。
 
 ## 监控菜单顺序
 
 ```text
 1. 安装监控机（首次，仅一台）
 2. 添加 / 部署被监控节点（自动流程）
-3. 查看面板访问方法
+3. 面板访问（域名 / SSH）>
 4. 查看状态和资源占用
 5. 查看日志
 6. 节点管理 / 手动接入 >
@@ -99,6 +100,47 @@ vt monitor access
 ```
 
 ## 打开 Grafana
+
+### 推荐：Cloudflare Tunnel 域名入口
+
+在监控机运行 `vt monitor tunnel-setup`，或 **主菜单 7 → 3 面板访问 → 1 配置 Grafana 域名入口**。
+
+1. 准备一个由 Cloudflare 托管的新子域名，例如 `monitor.yuchangsheng.top`。使用托管域名的一级子域名，以匹配 Universal SSL。**不用预先添加解析到 VPS IP 的 A/AAAA 记录**；已有同名记录会拒绝配置，不会覆盖。
+2. 在 Cloudflare 创建自定义 API Token，限制到所选账户及域名：`Account / Cloudflare Tunnel / Edit`、`Zone / DNS / Edit`、`Zone / Zone / Read`。最后一项用于自动识别 Zone 和账户。不要使用 Global API Key。
+3. 在 VPS 终端按提示输入域名、确认后隐藏输入 Token。脚本自动创建远程管理的 Tunnel、仅到 `http://127.0.0.1:3000` 的路由及橙云 CNAME，启动固定版本 `cloudflare/cloudflared:2026.11.0`。
+4. 通过 `https://monitor.yuchangsheng.top/` 登录 Grafana；用户名 admin，已有密码不变。初始密码保存在 `/opt/vps-toolkit-monitor/.env`，只在自己的终端查看。
+
+Cloudflare 自动签发和续签浏览器入口 HTTPS 证书；VPS 不需要 ACME、开放入站端口或占用 80/443。首次启用可能需要等待边缘证书生效。监控机需能出站连接 Cloudflare TCP/UDP 7844；默认优先 QUIC，受限时回退 HTTP/2。浏览器到 Cloudflare、Cloudflare 到 cloudflared 均加密，cloudflared 到 Grafana 仅走本机 HTTP。Prometheus 和 Node Exporter 不公开。
+
+API Token 临时保存为 root 私有文件，操作结束删除，不进入命令参数、环境变量或 Compose。运行时仅保留该 Tunnel 的连接 Token，文件权限 0400、挂载只读，容器以 UID 65532 运行。`tunnel/` 目录权限 0700，包含资源归属记录，勿公开或删除；移除入口时会再次要求 API Token，日常运行、重启和 Cloudflare 证书续签不要求密码或 API Token。
+
+新增 cloudflared 容器内存硬上限 96 MiB（不是实际占用承诺），CPU 上限 0.20 核；四个监控容器内存上限合计 592 MiB，不含 Docker 和代理。配置时要求 MemAvailable 至少 160 MiB。运行状态和日志可在菜单查看；断网 / 重启后容器自动重连。此入口仍需 Grafana 登录；如需仅本人可达，可在 Cloudflare 控制台额外配置 Access 应用和访问策略，本模块不会自动创建 Access 策略。
+
+```text
+面板访问子菜单（7 → 3）
+1. 配置 Grafana 域名入口
+2. 查看面板地址和 SSH 方法
+3. 查看域名入口状态
+4. 查看域名入口日志
+5. 暂停域名入口，恢复 SSH 访问
+6. 恢复域名入口
+7. 移除域名入口（保留监控数据）
+```
+
+```bash
+vt monitor tunnel-setup
+vt monitor tunnel-status
+vt monitor tunnel-logs
+vt monitor tunnel-stop      # 停 cloudflared，恢复 Grafana 本机 HTTP 配置
+vt monitor tunnel-start     # 使用已保存的 Tunnel Token 恢复，不重建 DNS
+vt monitor tunnel-remove    # 再次输入 API Token，删除本工具的 CNAME 和 Tunnel
+```
+
+域名模式启用 Grafana HTTPS 根地址和 Secure Cookie。需要通过下面的 SSH HTTP 地址登录时，先运行 `tunnel-stop`；Prometheus 的 SSH 访问不受影响。配置 / 暂停会重建 Grafana 容器，有短暂面板中断，不删除数据卷、不重启 Prometheus、不改变采集、3x-ui 或 Xray。
+
+创建失败时自动停止本次入口并尝试清理本次新建的云端资源；API 不可达或 Tunnel 仍显示在线时保留归属记录，可稍后 `tunnel-remove` 重试。清理只处理本工具记录的 Tunnel 及仍指向它的 CNAME，不删除后来改成其他目标的 DNS；Tunnel 被手工改名时停止删除并要求检查。不要在配置过程中手工删除本地 `tunnel/state.json`。集中端 `stop/uninstall` 停止连接器但保留云端记录和配置；彻底删除入口需要单独 `tunnel-remove`，Grafana / Prometheus 历史均保留。
+
+### 备用：SSH 访问
 
 Mac 终端运行（替换 SSH 信息）：
 
@@ -184,9 +226,13 @@ VPS 关机或网络断开期间仍然无法采集，Node Exporter 不补传历�
 
 ## 验证与资料
 
-离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
+离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。Tunnel 回归使用模拟 API 验证 DNS 冲突、失败回滚、断网重试及凭据隐藏；`python3 tests/monitoring_tunnel_integration.py` 使用真实 cloudflared CLI 和 Grafana 容器验证 Compose 合并、HTTPS 根地址 / Cookie、暂停后的 SSH 登录和密码保留，不使用真实 Cloudflare 账户。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
 
 - [Node Exporter](https://github.com/prometheus/node_exporter)
 - [Exporter Toolkit TLS 配置](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md)
 - [Prometheus 配置](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)
 - [Grafana 资源要求](https://grafana.com/docs/grafana/latest/setup-grafana/installation/)
+
+- [Cloudflare API 自动创建 Tunnel](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel-api/)
+- [cloudflared 运行参数](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/)
+- [Grafana 反向代理配置](https://grafana.com/tutorials/run-grafana-behind-a-proxy/)
