@@ -281,18 +281,20 @@ monitor_menu() {
         menu_items "监控管理（Prometheus + Grafana）" \
             "本机作为监控机：安装完整套件" \
             "本机作为被监控节点：只安装采集器" \
-            "接入远端节点（在监控机操作）" \
+            "验证并接入 HTTPS 节点 / 迁移旧 SSH 节点" \
             "移除远端节点（在监控机操作）" \
             "查看状态和资源占用" \
             "查看日志" \
             "查看面板访问方法" \
-            "查看监控机 SSH 公钥" \
+            "生成节点 HTTPS 证书包（在监控机操作）" \
             "启动监控服务" \
             "停止监控服务" \
             "重启监控服务" \
-            "卸载监控服务（保留数据）"
+            "卸载监控服务（保留数据）" \
+            "查看证书有效期" \
+            "续签客户端或节点证书"
         printf '  %s0.%s 返回\n' "$C_GREEN" "$C_RESET"
-        read_choice 12
+        read_choice 14
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
             2) run bash "$ROOT_DIR/scripts/monitor.sh" node-install ;;
@@ -301,11 +303,13 @@ monitor_menu() {
             5) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
             6) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
             7) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
-            8) run bash "$ROOT_DIR/scripts/monitor.sh" public-key ;;
+            8) run bash "$ROOT_DIR/scripts/monitor.sh" prepare-node ;;
             9) run bash "$ROOT_DIR/scripts/monitor.sh" start ;;
             10) run bash "$ROOT_DIR/scripts/monitor.sh" stop ;;
             11) run bash "$ROOT_DIR/scripts/monitor.sh" restart ;;
             12) run bash "$ROOT_DIR/scripts/monitor.sh" uninstall ;;
+            13) run bash "$ROOT_DIR/scripts/monitor.sh" cert-status ;;
+            14) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac

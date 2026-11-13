@@ -66,7 +66,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "up{job=\"node\"}",
+          "expr": "up{job=~\"node|node-https\"}",
           "legendFormat": "{{node}}",
           "range": true
         }
@@ -108,7 +108,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - avg by (instance, node) (rate(node_cpu_seconds_total{job=\"node\",mode=\"idle\"}[5m])))",
+          "expr": "100 * (1 - avg by (instance, node) (rate(node_cpu_seconds_total{job=~\"node|node-https\",mode=\"idle\"}[5m])))",
           "legendFormat": "{{node}}",
           "range": true
         }
@@ -139,7 +139,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - node_memory_MemAvailable_bytes{job=\"node\"} / node_memory_MemTotal_bytes{job=\"node\"})",
+          "expr": "100 * (1 - node_memory_MemAvailable_bytes{job=~\"node|node-https\"} / node_memory_MemTotal_bytes{job=~\"node|node-https\"})",
           "legendFormat": "{{node}}",
           "range": true
         }
@@ -170,7 +170,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{job=\"node\",mountpoint=\"/\",fstype!~\"tmpfs|overlay\"})",
+          "expr": "100 * (1 - node_filesystem_avail_bytes{job=~\"node|node-https\",mountpoint=\"/\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{job=~\"node|node-https\",mountpoint=\"/\",fstype!~\"tmpfs|overlay\"})",
           "legendFormat": "{{node}}",
           "range": true
         }
@@ -200,7 +200,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(node_network_receive_bytes_total{job=\"node\",device!=\"lo\"}[5m])",
+          "expr": "rate(node_network_receive_bytes_total{job=~\"node|node-https\",device!=\"lo\"}[5m])",
           "legendFormat": "{{node}} / {{device}}",
           "range": true
         }
@@ -230,7 +230,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(node_network_transmit_bytes_total{job=\"node\",device!=\"lo\"}[5m])",
+          "expr": "rate(node_network_transmit_bytes_total{job=~\"node|node-https\",device!=\"lo\"}[5m])",
           "legendFormat": "{{node}} / {{device}}",
           "range": true
         }

@@ -1,0 +1,11 @@
+scrape_configs:
+  - job_name: node-https
+    scheme: https
+    tls_config:
+      ca_file: /etc/prometheus/tls/ca.pem
+      cert_file: /etc/prometheus/tls/client.pem
+      key_file: /etc/prometheus/tls/client-key.pem
+      min_version: TLS12
+    file_sd_configs:
+      - files: ["/etc/prometheus/https-targets/*.json"]
+        refresh_interval: 30s

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/monitor.sh"
 
 
-class MonitoringTests(unittest.TestCase):
+class MonitoringFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -40,6 +40,8 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
 
+
+class MonitoringTests(MonitoringFixture):
     def test_help_and_cli_forwarding(self):
         help_result = subprocess.run(
             ["bash", str(ROOT / "vps.sh"), "help"], text=True, capture_output=True, check=True
@@ -52,7 +54,7 @@ class MonitoringTests(unittest.TestCase):
         shutil.copy(ROOT / "vps.sh", repo / "vps.sh")
         shutil.copy(ROOT / "lib/common.sh", repo / "lib/common.sh")
         (repo / "scripts/monitor.sh").write_text('printf "%s\\n" "$@"\n')
-        args = ["node-install", "--public-key", "ssh-ed25519 PUBLIC KEY"]
+        args = ["node-install", "--bundle", "/root/path with spaces/node.tar.gz"]
         r = subprocess.run(["bash", str(repo / "vps.sh"), "monitor", *args],
                            text=True, capture_output=True, check=True)
         self.assertEqual(r.stdout.splitlines(), args)
@@ -78,18 +80,9 @@ valid_user vps-monitor
 ! valid_port 65536
 ! valid_port 00000
 ''')
-        r = self.shell('write_target ../../escape 19101', check=False)
+        r = self.shell('write_https_target ../../escape', check=False)
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(list((self.hub / "prometheus/targets").iterdir()), [])
-
-    def test_target_is_valid_json_and_readable_to_container(self):
-        self.shell('write_target isp-exit 19101')
-        target = self.hub / "prometheus/targets/isp-exit.json"
-        self.assertEqual(json.loads(target.read_text()), [
-            {"targets": ["127.0.0.1:19101"], "labels": {"node": "isp-exit"}}
-        ])
-        self.assertEqual(target.stat().st_mode & 0o777, 0o644)
-        self.assertFalse(target.with_suffix(".json.tmp").exists())
 
     def test_existing_install_does_not_rotate_password(self):
         (self.hub / ".vps-toolkit-managed").touch()
@@ -110,47 +103,6 @@ valid_user vps-monitor
         r = self.shell('linux_root() { :; }; node_install', check=False)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("无需重复安装", r.stderr)
-
-    def add_node_mocks(self, success):
-        (self.ssh / "id_ed25519.pub").write_text("ssh-ed25519 TEST vps-toolkit-monitor\n")
-        return '''
-linux_root() { :; }
-require_hub() { :; }
-ensure_packages() { :; }
-setup_ssh() { :; }
-check_ports() { :; }
-confirm() { return 0; }
-runuser() { return 1; }
-chown() { :; }
-sleep() { :; }
-systemctl() { printf '%s\\n' "$*" >> "$CALL_LOG"; }
-''' + ('curl() { printf "node_exporter_build_info{version=\\"1\\"} 1\\n"; }\n'
-       if success else 'curl() { return 7; }\n')
-
-    def test_failed_probe_rolls_back_tunnel_and_target(self):
-        r = self.shell(self.add_node_mocks(False) + 'add_node',
-                       "isp-exit\n192.0.2.10\n22\n\n19101\n", check=False)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertFalse((self.ssh / "config.d/isp-exit").exists())
-        self.assertFalse((self.hub / "prometheus/targets/isp-exit.json").exists())
-        self.assertIn("disable --now vps-toolkit-monitor-tunnel@isp-exit", self.log.read_text())
-
-    def test_successful_probe_publishes_target(self):
-        self.shell(self.add_node_mocks(True) + 'add_node',
-                   "isp-exit\n192.0.2.10\n00022\n\n19101\n")
-        config = (self.ssh / "config.d/isp-exit").read_text()
-        self.assertIn("StrictHostKeyChecking yes", config)
-        self.assertIn("Port 22", config)
-        self.assertIn("LocalForward 127.0.0.1:19101 127.0.0.1:9100", config)
-        self.assertTrue((self.hub / "prometheus/targets/isp-exit.json").exists())
-
-    def test_configured_port_cannot_be_reused_when_tunnel_is_down(self):
-        (self.ssh / "config.d/another").write_text("    LocalForward 127.0.0.1:19101 127.0.0.1:9100\n")
-        r = self.shell(self.add_node_mocks(True) + 'add_node',
-                       "isp-exit\n192.0.2.10\n22\n\n19101\n", check=False)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertFalse(self.log.exists())
-        self.assertFalse((self.ssh / "config.d/isp-exit").exists())
 
     def test_uninstall_keeps_data_and_disables_tunnels(self):
         (self.hub / ".vps-toolkit-managed").touch()
