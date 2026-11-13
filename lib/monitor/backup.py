@@ -6,7 +6,6 @@ import fcntl
 import getpass
 import gzip
 import hashlib
-import http.client
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -76,57 +75,103 @@ def validate_config(config):
 
 
 class Telegram:
-    """TLS streaming upload; Token never enters subprocess argv, URLs in logs or redirects."""
+    """Bounded curl with IPv4 preference; credentials enter only its stdin config."""
     def __init__(self, config):
         self.token = config['token']
         self.chat = str(config['chat_id'])
 
-    def request(self, method, fields=None, document=None):
-        boundary = 'vtk' + uuid.uuid4().hex
-        fields = fields or {}
-        prefix = b''
-        for name, value in fields.items():
-            prefix += (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n').encode()
+    @staticmethod
+    def quote(value):
+        # curl config escaping, not shell quoting; preserve literal UTF-8.
+        return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('\r', '\\r').replace('\n', '\\n') + '"'
+
+    def transport(self, method, fields, document, family):
+        limit = 180 if document else 20
+        config = 'url = ' + self.quote('https://api.telegram.org/bot' + self.token + '/' + method) + '\n'
         if document:
-            prefix += (f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{document.name}"\r\n'
-                       'Content-Type: application/octet-stream\r\n\r\n').encode()
-        ending = (f'\r\n--{boundary}--\r\n').encode()
+            for name, value in fields.items():
+                config += 'form-string = ' + self.quote(name + '=' + str(value)) + '\n'
+            # There are two parsers: quote the multipart filename, then the config value.
+            path = str(document.resolve()).replace('\\', '\\\\').replace('"', '\\"')
+            config += 'form = ' + self.quote('document=@"' + path + '"') + '\n'
+            config += 'header = "Expect:"\n'
+        elif fields:
+            config += 'header = "Content-Type: application/json"\n'
+            config += 'data-binary = ' + self.quote(json.dumps(fields)) + '\n'
+        # getMe has no parameters: send a normal GET, never an empty multipart body.
+        args = ['curl', '-q', '--silent', '--show-error', '--noproxy', '*', family,
+                '--proto', '=https', '--connect-timeout', '6', '--max-time', str(limit),
+                '--request', 'POST' if fields or document else 'GET', '--config', '-',
+                '--write-out', '\n%{http_code}']
+        try:
+            result = subprocess.run(args, input=config, text=True, encoding='utf-8',
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=limit + 5)
+        except subprocess.TimeoutExpired:
+            return None, '请求超过硬超时，已终止（DNS / 连接 / 传输）'
+        except OSError:
+            raise Error('无法运行 curl，请安装 curl 后重试。') from None
+        if result.returncode:
+            reasons = {5: '代理解析失败', 6: 'DNS 解析失败', 7: 'TCP 443 连接失败',
+                       28: 'DNS / 连接 / 传输超时', 35: 'TLS 握手失败', 60: 'TLS 证书验证失败',
+                       26: '无法读取本地备份文件', 52: '服务器返回空响应', 56: '连接接收失败'}
+            return None, reasons.get(result.returncode, '网络请求失败') + f'（curl {result.returncode}）'
+        try:
+            body, status = result.stdout.rsplit('\n', 1)
+            return (int(status), body), None
+        except (ValueError, TypeError):
+            return None, 'HTTP 状态返回格式异常'
+
+    def request(self, method, fields=None, document=None):
+        if method not in ('getMe', 'getChat', 'sendDocument'):
+            raise Error('不支持的 Telegram 操作。')
+        last = ''
         for attempt in range(3):
-            connection = http.client.HTTPSConnection('api.telegram.org', timeout=120)
             retry_after = 5 * (attempt + 1)
-            try:
-                connection.putrequest('POST', '/bot' + self.token + '/' + method)
-                connection.putheader('Content-Type', 'multipart/form-data; boundary=' + boundary)
-                connection.putheader('Content-Length', str(len(prefix) + len(ending) + (document.stat().st_size if document else 0)))
-                connection.endheaders()
-                connection.send(prefix)
-                if document:
-                    with document.open('rb') as stream:
-                        while True:
-                            block = stream.read(128 * 1024)
-                            if not block:
-                                break
-                            connection.send(block)
-                connection.send(ending)
-                response = connection.getresponse()
-                value = json.loads(response.read(65536))
-                if response.status == 200 and value.get('ok'):
+            failures = []
+            for family in ('--ipv4', '--ipv6'):
+                ip = 'IPv4' if family == '--ipv4' else 'IPv6'
+                print(f'Telegram：{method}，{ip}，第 {attempt + 1}/3 次，单次最多 {180 if document else 20} 秒…', flush=True)
+                result, failure = self.transport(method, fields or {}, document, family)
+                if failure:
+                    last = ip + '：' + failure
+                    failures.append(last)
+                    print(last + '；' + ('尝试 IPv6 回退。' if ip == 'IPv4' else '本轮连接失败。'), flush=True)
+                    continue
+                status, body = result
+                try:
+                    value = json.loads(body)
+                except (ValueError, TypeError):
+                    value = None
+                if status == 200 and isinstance(value, dict) and value.get('ok') and 'result' in value:
                     return value['result']
-                if response.status not in (429, 500, 502, 503, 504):
-                    raise Error(f'Telegram API HTTP {response.status}；请检查 Bot Token、Chat ID、是否已 /start 以及文件限制。')
-                retry_after = min(60, max(1, int(value.get('parameters', {}).get('retry_after', retry_after))))
-            except (OSError, ValueError, http.client.HTTPException):
-                pass
-            finally:
-                connection.close()
+                code = value.get('error_code', status) if isinstance(value, dict) else status
+                if not isinstance(code, int) or isinstance(code, bool) or not 100 <= code <= 599:
+                    code = status
+                # Never echo bodies or descriptions; errors can contain a token-bearing URL.
+                if code not in (429, 500, 502, 503, 504):
+                    hint = {401: 'Bot Token 无效或已撤销', 404: '请检查 Bot Token 是否完整且属于当前 Bot',
+                            403: 'Bot 被阻止或无权访问该聊天', 400: '请核对个人 Chat ID，并先向此 Bot 发送 /start'}.get(code, '请求未被 Telegram 接受')
+                    extra = '；响应不是有效 JSON' if not isinstance(value, dict) else ''
+                    raise Error(f'Telegram {method} HTTP {status} / API {code}：{hint}{extra}。')
+                if isinstance(value, dict):
+                    try:
+                        retry_after = min(60, max(1, int(value.get('parameters', {}).get('retry_after', retry_after))))
+                    except (ValueError, TypeError):
+                        pass
+                last = f'{method} HTTP {status} / API {code}'
+                break  # HTTP response proves connectivity; no family fallback for API errors.
+            else:
+                last = '；'.join(failures)
             if attempt < 2:
+                print(f'Telegram：{retry_after} 秒后重试…', flush=True)
                 time.sleep(retry_after)
-        raise Error('Telegram 连接或上传失败，已重试三次；本地加密文件保留，未标记为发送成功。')
+        outcome = '本地加密文件保留，未标记发送成功' if document else '验证未通过，尚未启用自动备份'
+        raise Error(f'Telegram {method} 失败，已重试三次；最后原因：{last}；{outcome}。')
 
     def verify(self):
         self.request('getMe')
         chat = self.request('getChat', {'chat_id': self.chat})
-        if chat.get('type') != 'private':
+        if not isinstance(chat, dict) or chat.get('type') != 'private':
             raise Error('备份仅支持发送到个人聊天，请填写你与 Bot 对话的数字 Chat ID。')
 
     def send(self, path, caption):
