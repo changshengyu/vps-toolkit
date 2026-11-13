@@ -12,6 +12,7 @@
 | geodata 自动更新 | `geodata` | 只为已有 3x-ui 开启 / 关闭 geoip、geosite 自动更新 |
 | Hysteria2 端口跳跃 | `hy2` | 用 nftables 重定向端口，重启后自动恢复，详见[文档](docs/hy2-port-hopping.md) |
 | 3x-ui 面板 | `3x-ui` | 运行 [3x-ui](https://github.com/MHSanaei/3x-ui) 官方安装脚本，详见[文档](docs/3x-ui.md) |
+| IPv6 开关 | `ipv6` | 查看 / 开启 / 关闭系统 IPv6，重启后保持；纯 IPv6 机器不允许关闭 |
 | VPS 多功能工具箱 | `tools` | 运行 [vps_scripts](https://github.com/everett7623/vps_scripts) |
 
 一键部署生成的入站：
@@ -61,23 +62,21 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh)
 ```
 
-菜单顶部显示 3x-ui、端口跳跃和部署结果的状态，输入数字选择功能，执行完回到菜单：
+菜单顶部显示 3x-ui、端口跳跃、IPv6 和部署结果的状态，输入数字进入各级菜单，执行完回到当前菜单：
 
 ```
-  节点部署                         3x-ui 面板
-  1.  一键部署节点                 6.  安装 3x-ui
-  2.  预览部署配置                 7.  查看 3x-ui 状态
-  3.  重新部署（覆盖入站）         8.  路由域策略改为 IPIfNonMatch
-  4.  旧机器只更新配置             9.  开启 geodata 自动更新
-  5.  查看部署结果                 10. 自定义 geodata 更新时间
-                                   11. 关闭 geodata 自动更新
-  Hysteria2 端口跳跃               其他
-  12. 安装或更新规则               15. VPS 多功能工具箱
-  13. 查看状态                     16. 安装快捷命令 vt
-  14. 卸载                         0.  退出
+主菜单
+├─ 1. 节点部署 >        一键部署 / 预览 / 重新部署 / 旧机器只更新配置 / 查看部署结果
+├─ 2. 3x-ui 面板 >      安装 / 状态 / 路由域策略改为 IPIfNonMatch
+│                       └─ geodata 自动更新 >  开启 / 自定义更新时间 / 关闭
+├─ 3. Hysteria2 端口跳跃 >  安装或更新 / 状态 / 卸载
+├─ 4. 系统设置（IPv6）>    查看状态 / 开启 / 关闭
+├─ 5. VPS 多功能工具箱
+├─ 6. 安装快捷命令 vt
+└─ 0. 退出
 ```
 
-选 16 安装快捷命令后，以后直接输入 `vt` 打开菜单（每次运行仓库最新版），也可以带参数，如 `vt deploy --config-only`。
+选 6 安装快捷命令后，以后直接输入 `vt` 打开菜单（每次运行仓库最新版），也可以带参数，如 `vt deploy --config-only`。
 
 也可以克隆仓库后运行：
 
@@ -104,6 +103,7 @@ bash vps.sh 3x-ui install       # 只安装 3x-ui
 bash vps.sh 3x-ui status        # 查看 3x-ui 状态
 bash vps.sh result              # 查看上次部署结果
 bash vps.sh shortcut            # 安装快捷命令 vt
+bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
 bash vps.sh tools               # 打开工具箱
 ```
 

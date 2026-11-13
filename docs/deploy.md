@@ -223,3 +223,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata "0 3 * * 1"  # 自定义时间
 bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh) geodata off          # 关闭
 ```
+
+## SS 密码校验
+
+`2022-blake3-*` 加密方式的密码是 base64 编码的固定长度密钥（`aes-128` 为 24 个字符，`aes-256` 和 `chacha20` 为 44 个字符，均以 `=` 结尾）。部署时会检查长度，复制不完整时交互输入会提示重新输入，命令行或配置文件传入时会直接报错。参数摘要中会显示密码的首尾几位和长度，方便核对。
+
