@@ -196,6 +196,8 @@ wait_node_scrape() {
     selector="$(jq -nr --arg node "$label" --arg instance "$target" '
         "up{job=\"node-https\",node=\($node|tojson),instance=\($instance|tojson)}"')"
     since="$(date +%s)"
+    # Move past this whole second so a pre-registration sample cannot match.
+    since=$((since + 1))
     query="($selector == 1) and (timestamp($selector) >= $since)"
     deadline=$((SECONDS + 120))
     info "等待 Prometheus 实际采集 ${label}（最长约 120 秒，默认每 60 秒采集）…"

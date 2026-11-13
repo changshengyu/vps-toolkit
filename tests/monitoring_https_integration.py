@@ -8,6 +8,7 @@ import ssl
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -117,6 +118,20 @@ compose() {
                 raise AssertionError("Prometheus never successfully scraped the HTTPS target")
             time.sleep(1)
         print("PASS: real Prometheus scrapes Node Exporter over mTLS (up=1)", flush=True)
+        def sample_time():
+            encoded = urllib.parse.urlencode({"query": 'timestamp(up{job="node-https",node="isp-exit"})'})
+            with opener().open(f"http://127.0.0.1:{api_port}/api/v1/query?{encoded}", timeout=3) as response:
+                return float(json.load(response)["data"]["result"][0]["value"][1])
+
+        previous_sample = sample_time()
+        fixture.env["RECENT_SAMPLE_SECOND"] = str(int(previous_sample))
+        # Simulate re-registering within the same second as the previous sample.
+        fixture.shell(adapters + '''
+date() { printf '%s\\n' "$RECENT_SAMPLE_SECOND"; }
+wait_node_scrape isp-exit
+''')
+        assert sample_time() > previous_sample
+        print("PASS: re-registering a node waits for a fresh sample rather than cached up=1", flush=True)
         fixture.log.write_text("")
         fixture.shell(adapters + '''
 activate_https_job
