@@ -85,6 +85,8 @@ exit "${MENU_ACTION_EXIT:-0}"
             (6, 1): ["cert-status"], (6, 2): ["renew-node"], (6, 3): ["cert-renew", "client"], (6, 4): ["remove-node"],
             (7, 1): ["prepare-node"], (7, 2): ["node-install"], (7, 3): ["add-node"],
             (8, 1): ["start"], (8, 2): ["stop"], (8, 3): ["restart"], (8, 4): ["uninstall"],
+            (9, 1): ["backup-setup"], (9, 2): ["backup-run"], (9, 3): ["backup-status"], (9, 4): ["backup-logs"],
+            (9, 5): ["backup-restore"], (9, 6): ["backup-pause"], (9, 7): ["backup-resume"],
         }
         for path, expected in routes.items():
             with self.subTest(path=path):

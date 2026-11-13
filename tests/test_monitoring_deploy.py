@@ -170,6 +170,25 @@ deploy_node
         self.assertEqual(regular[:4], ["sudo", "-n", "bash", "-c"])
         self.assertEqual(root[-1], (ROOT / "lib/monitor/remote-install.sh").read_text())
 
+    def test_restored_node_can_use_password_when_original_login_key_is_absent(self):
+        (self.hub / 'deploy').mkdir()
+        config = self.config()
+        config['ssh']['identity_file'] = str(self.path / 'old-host-only-key')
+        (self.hub / 'deploy/isp-exit.json').write_text(json.dumps(config))
+        result = self.shell('''
+linux_root() { :; }; require_hub() { :; }; ensure_packages() { :; }; confirm() { return 0; }
+package_meta() {
+    if [ "$1" = resolve ]; then printf '["192.0.2.10"]'; else
+        python3 "$ROOT_DIR/lib/monitor/package.py" "$@"
+    fi
+}
+apply_deployment() { printf '%s' "$1" > "$TMPDIR/wizard-config.json"; }
+deploy_node
+''', 'isp-exit\n\n\n\n\n\n\n')
+        restored = json.loads((self.path / 'wizard-config.json').read_text())
+        self.assertEqual(restored['ssh']['identity_file'], '')
+        self.assertIn('原 SSH 登录私钥', result.stderr)
+
     def test_remote_protocol_installs_from_stdin_and_cleans_temporary_files(self):
         before = set(Path("/tmp").glob("vtm-node.*"))
         toolkit = io.BytesIO()

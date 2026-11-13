@@ -488,6 +488,35 @@ monitor_tunnel_menu() {
     done
 }
 
+monitor_backup_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / 备份与恢复"
+        info "  加密后发给 Telegram Bot；解密密钥另存 Mac。恢复仅用于全新监控机。"
+        menu_items "备份与恢复（Telegram）" \
+            "配置 Telegram 自动备份" \
+            "立即备份并发送" \
+            "查看备份状态" \
+            "查看备份日志" \
+            "从备份恢复（全新监控机）" \
+            "暂停自动备份" \
+            "恢复自动备份"
+        menu_navigation
+        read_choice 7
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" backup-setup ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" backup-run ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" backup-status ;;
+            4) run bash "$ROOT_DIR/scripts/monitor.sh" backup-logs ;;
+            5) run bash "$ROOT_DIR/scripts/monitor.sh" backup-restore ;;
+            6) run bash "$ROOT_DIR/scripts/monitor.sh" backup-pause ;;
+            7) run bash "$ROOT_DIR/scripts/monitor.sh" backup-resume ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 monitor_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / 监控管理"
@@ -500,9 +529,10 @@ monitor_menu() {
             "状态与日志 >" \
             "节点与证书 >" \
             "高级手动接入 >" \
-            "启动 / 停止 / 重启 / 卸载 >"
+            "启动 / 停止 / 重启 / 卸载 >" \
+            "备份与恢复（Telegram）>"
         menu_navigation
-        read_choice 8
+        read_choice 9
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
             2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
@@ -512,6 +542,7 @@ monitor_menu() {
             6) monitor_nodes_menu; continue ;;
             7) monitor_manual_menu; continue ;;
             8) monitor_services_menu; continue ;;
+            9) monitor_backup_menu; continue ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac

@@ -16,7 +16,7 @@ build_toolkit_archive() {
     local archive="$1"
     COPYFILE_DISABLE=1 tar -czf "$archive" -C "$ROOT_DIR" \
         lib/common.sh lib/monitor/package.py lib/monitor/tls.sh \
-        lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh scripts/monitor.sh
+        lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/backup.sh lib/monitor/backup.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh scripts/monitor.sh
 }
 
 remote_install_command() {
@@ -65,6 +65,10 @@ deploy_node() {
     read -r -p "远端 SSH 端口 [$value]: " ssh_port; ssh_port="${ssh_port:-$value}"
     valid_port "$ssh_port" || die "SSH 端口无效。"
     value="$(printf '%s' "$previous" | jq -r '.ssh.identity_file // empty')"
+    if [ -n "$value" ] && [ ! -r "$value" ]; then
+        warn "原 SSH 登录私钥在本机不可读；可填写新的私钥路径，或留空使用默认密钥/密码。专用续期密钥仍单独保留。"
+        value=""
+    fi
     read -r -p "监控机上的 SSH 私钥绝对路径${value:+ [$value]}（留空使用默认密钥/密码）: " identity
     identity="${identity:-$value}"
     if [ -n "$identity" ]; then [ -r "$identity" ] || die "无法读取私钥文件；请使用监控机上的路径，不是 Mac 路径。"; fi
@@ -175,7 +179,7 @@ install_renew_timer() {
     install -d -m 755 "$MONITOR_DIR/toolkit/scripts" "$MONITOR_DIR/toolkit/lib/monitor" "$MONITOR_DIR/toolkit/templates/monitoring"
     local path
     if [ ! "$ROOT_DIR" -ef "$MONITOR_DIR/toolkit" ]; then
-        for path in lib/common.sh scripts/monitor.sh lib/monitor/tls.sh lib/monitor/package.py lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh; do
+        for path in lib/common.sh scripts/monitor.sh lib/monitor/tls.sh lib/monitor/package.py lib/monitor/deploy.sh lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/backup.sh lib/monitor/backup.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh; do
             install -m 644 "$ROOT_DIR/$path" "$MONITOR_DIR/toolkit/$path"
         done
         cp -R "$ROOT_DIR/templates/monitoring/." "$MONITOR_DIR/toolkit/templates/monitoring/"
