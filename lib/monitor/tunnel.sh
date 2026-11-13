@@ -9,11 +9,13 @@ cf_read_token() {
     local token
     info "在 Cloudflare 创建自定义 API Token，限定到此账户和域名："
     info "Account / Cloudflare Tunnel / Edit；Zone / DNS / Edit；Zone / Zone / Read。"
+    info "粘贴 Token 后按一次回车；输入期间屏幕不会显示字符。"
     read -r -s -p "Cloudflare API Token（隐藏输入，仅本次操作使用）: " token
     printf '\n'
     [ -n "$token" ] || die "Token 不能为空。"
     (umask 077; printf '%s' "$token" > "$cf_api_token")
     unset token
+    info "Token 已接收，开始请求 Cloudflare。"
 }
 
 cf_wait_ready() {
