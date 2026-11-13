@@ -111,7 +111,8 @@ bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
 bash vps.sh monitor             # 打开监控管理菜单
 bash vps.sh monitor hub-install # 仅在一台监控机安装 Prometheus + Grafana
 bash vps.sh monitor deploy-node # 填节点域名和 SSH 信息，自动安装并接入
-bash vps.sh monitor access      # 第 3 步：查看面板访问方法
+bash vps.sh monitor tunnel-setup # 第 3 步：自动配置 Grafana HTTPS 域名入口
+bash vps.sh monitor access      # 查看域名地址或备用 SSH 访问方法
 bash vps.sh monitor renew-node  # 一键续签并同步，无需手工传证书包
 bash vps.sh monitor cert-status # 查看证书有效期
 bash vps.sh monitor help        # 查看全部监控操作

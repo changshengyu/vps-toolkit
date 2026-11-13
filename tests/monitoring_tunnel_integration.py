@@ -71,15 +71,21 @@ def main():
             return client.open(urllib.request.Request(url, data=data, headers=headers), timeout=5)
 
         def wait(url):
-            for attempt in range(90):
+            for attempt in range(240):
                 try:
                     with request(url + "/api/health") as response:
                         if json.load(response)["database"] == "ok":
                             return
                 except (OSError, ValueError, urllib.error.URLError):
                     pass
+                if attempt % 10 == 0:
+                    container = run(*active_test, "ps", "--all", "--quiet", "grafana")
+                    state = json.loads(run("docker", "inspect", container))[0]
+                    if state["RestartCount"] or state["State"].get("OOMKilled"):
+                        raise AssertionError("Grafana restarted during startup: " + json.dumps({
+                            "restarts": state["RestartCount"], "state": state["State"]}))
                 time.sleep(1)
-            raise AssertionError("Grafana did not become healthy")
+            raise AssertionError("Grafana did not become healthy within 240 seconds")
 
         try:
             run(*active_test, "up", "-d", "--no-deps", "grafana")
@@ -102,7 +108,7 @@ def main():
                 assert any("grafana_session=" in cookie and "; Secure" not in cookie for cookie in cookies), cookies
             print("PASS: Compose merge, cloudflared token-file CLI, HTTPS root URL + Secure cookie, SSH fallback and preserved login")
         except Exception:
-            print(run(*active_test, "logs", "--tail=30", "grafana"))
+            print(run(*active_test, "logs", "--tail=100", "grafana"))
             raise
         finally:
             run(*active_test, "down", "--volumes", "--remove-orphans")
