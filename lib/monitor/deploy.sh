@@ -65,6 +65,10 @@ deploy_node() {
     read -r -p "远端 SSH 端口 [$value]: " ssh_port; ssh_port="${ssh_port:-$value}"
     valid_port "$ssh_port" || die "SSH 端口无效。"
     value="$(printf '%s' "$previous" | jq -r '.ssh.identity_file // empty')"
+    if [ -n "$value" ] && [ ! -r "$value" ]; then
+        warn "原 SSH 登录私钥在本机不可读；可填写新的私钥路径，或留空使用默认密钥/密码。专用续期密钥仍单独保留。"
+        value=""
+    fi
     read -r -p "监控机上的 SSH 私钥绝对路径${value:+ [$value]}（留空使用默认密钥/密码）: " identity
     identity="${identity:-$value}"
     if [ -n "$identity" ]; then [ -r "$identity" ] || die "无法读取私钥文件；请使用监控机上的路径，不是 Mac 路径。"; fi
