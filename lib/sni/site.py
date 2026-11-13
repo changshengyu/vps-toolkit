@@ -163,12 +163,33 @@ def render_page(title):
 def dns_preflight(domain):
     # Bound getaddrinfo in its own process, including a stalled system resolver.
     code = 'import socket,json,sys;print(json.dumps(sorted({x[4][0] for x in socket.getaddrinfo(sys.argv[1],443,type=socket.SOCK_STREAM)})))'
-    resolved = json.loads(command([sys.executable, '-c', code, domain], timeout=10))
+    try:
+        resolved = json.loads(command([sys.executable, '-c', code, domain], timeout=10))
+    except (ValueError, TypeError):
+        raise Error('域名解析返回格式异常，请检查本机 DNS 解析器。') from None
     if not resolved or any(not ipaddress.ip_address(ip).is_global for ip in resolved):
         raise Error('域名必须解析到本机公开 A/AAAA 地址，不能使用本地或保留地址。')
     local = set()
-    for item in json.loads(command(['ip', '-j', 'addr', 'show', 'scope', 'global'])):
-        local.update(a['local'] for a in item.get('addr_info', []))
+    try:
+        interfaces = json.loads(command(['ip', '-j', 'addr', 'show', 'scope', 'global']))
+    except (ValueError, TypeError):
+        raise Error('无法解析 ip -j 接口地址输出，请检查 iproute2。') from None
+    if not isinstance(interfaces, list):
+        raise Error('ip -j 接口地址输出应为数组，请检查 iproute2。')
+    for item in interfaces:
+        if not isinstance(item, dict) or not isinstance(item.get('addr_info'), list):
+            continue
+        for entry in item['addr_info']:
+            # Some iproute2 versions retain {} placeholders after scope filtering.
+            address = entry.get('local') if isinstance(entry, dict) else None
+            if not isinstance(address, str) or not address:
+                continue
+            try:
+                local.add(str(ipaddress.ip_address(address)))
+            except ValueError:
+                continue
+    if not local:
+        raise Error('ip -j 未返回有效的本机接口地址，请检查网卡地址或 iproute2 输出。')
     missing = set(resolved) - local
     if missing:
         # Public egress lookup is needed for NAT or otherwise non-local DNS addresses.

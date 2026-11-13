@@ -94,6 +94,26 @@ class SiteTests(unittest.TestCase):
             self.assertEqual(s.dns_preflight('site.example.com'), ['8.8.8.8'])
         self.assertEqual(cmd.call_count, 2)
 
+    def test_scope_filtered_empty_entries_and_multiple_interfaces(self):
+        interfaces = [{'ifname': 'eth0', 'addr_info': [{'family': 'inet', 'local': '8.8.8.8'}, {}]},
+                      {'ifname': 'eth1', 'addr_info': [{'family': 'inet', 'local': '10.0.161.20'}, {}]}]
+        replies = ['["8.8.8.8"]', json.dumps(interfaces)]
+        with patch.object(s, 'command', side_effect=replies) as cmd:
+            self.assertEqual(s.dns_preflight('site.example.com'), ['8.8.8.8'])
+        self.assertEqual(cmd.call_count, 2)  # No unnecessary external IP service.
+
+    def test_ipv6_interface_is_normalized_while_empty_placeholders_are_ignored(self):
+        replies = ['["2001:4860:4860::8888"]',
+                   '[{"addr_info":[{}, {"local":"2001:4860:4860:0:0:0:0:8888"}, {"local":null}]}]']
+        with patch.object(s, 'command', side_effect=replies) as cmd:
+            self.assertEqual(s.dns_preflight('site.example.com'), ['2001:4860:4860::8888'])
+        self.assertEqual(cmd.call_count, 2)
+
+    def test_empty_interface_output_has_actionable_error(self):
+        replies = ['["8.8.8.8"]', '[{"addr_info":[{}, {"local":null}]}]']
+        with patch.object(s, 'command', side_effect=replies), self.assertRaisesRegex(s.Error, '未返回有效'):
+            s.dns_preflight('site.example.com')
+
     def test_import_html_preserves_previous_page_without_restart(self):
         self.owned()
         target = self.paths.web / 'index.html'
