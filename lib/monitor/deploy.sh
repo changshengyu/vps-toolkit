@@ -36,10 +36,15 @@ deploy_node() {
     require_hub
     ensure_packages openssl jq python3 curl tar
     require_command ssh
-    local name address source_ip port user ssh_port identity previous="{}" value detected="" metadata config temporary
-    read -r -p "节点名称（已有节点同名即更新）: " name
-    valid_name "$name" && [ "$name" != client ] || die "节点名称无效或为保留名称。"
-    if [ -f "$DEPLOY_DIR/$name.json" ]; then previous="$(package_meta deployment "$DEPLOY_DIR/$name.json")"; fi
+    local name display_name address source_ip port user ssh_port identity previous="{}" value detected="" metadata config temporary
+    info "节点显示名称支持中文、空格、. 和 /；已有节点使用原名称即可更新。"
+    read -r -p "节点名称（已有节点同名即更新）: " display_name
+    name="$(node_key "$display_name")"
+    if [ -f "$DEPLOY_DIR/$name.json" ]; then
+        previous="$(package_meta deployment "$DEPLOY_DIR/$name.json")"
+        if [ "$display_name" = "$name" ]; then display_name="$(printf '%s' "$previous" | jq -r '.node.display_name // .node.name')"; fi
+    fi
+    info "节点：${display_name}"
     value="$(printf '%s' "$previous" | jq -r '.node.address // empty')"
     read -r -p "节点直连域名或公网 IP${value:+ [$value]}: " address; address="${address:-$value}"
     package_meta identity "$address" >/dev/null
@@ -52,7 +57,7 @@ deploy_node() {
     value="$(printf '%s' "$previous" | jq -r '.node.port // 19100')"
     read -r -p "节点 HTTPS 端口 [$value]: " port; port="${port:-$value}"
     valid_port "$port" || die "端口无效。"
-    metadata="$(package_meta create "$name" "$address" "$source_ip" "$((10#$port))")"
+    metadata="$(package_meta create "$display_name" "$address" "$source_ip" "$((10#$port))")"
     package_meta resolve "$address" "$source_ip" >/dev/null || die "域名没有匹配源 IP 地址族的解析，请确认直连 A/AAAA 记录。"
     value="$(printf '%s' "$previous" | jq -r '.ssh.user // "root"')"
     read -r -p "远端 SSH 用户 [$value]: " user; user="${user:-$value}"
@@ -95,6 +100,7 @@ apply_deployment() (
     printf '%s\n' "$deploy_config" > "$deploy_work/config.json"
     package_meta deployment "$deploy_work/config.json" >/dev/null
     deploy_name="$(jq -r .node.name "$deploy_work/config.json")"
+    deploy_label="$(jq -r '.node.display_name // .node.name' "$deploy_work/config.json")"
     deploy_address="$(jq -r .node.address "$deploy_work/config.json")"
     deploy_source="$(jq -r .node.monitor_ip "$deploy_work/config.json")"
     deploy_user="$(jq -r .ssh.user "$deploy_work/config.json")"
@@ -145,19 +151,23 @@ apply_deployment() (
     chmod 600 "$DEPLOY_DIR/$deploy_name.json.tmp"
     mv "$DEPLOY_DIR/$deploy_name.json.tmp" "$DEPLOY_DIR/$deploy_name.json"
     write_https_target "$deploy_name"
-    cleanup_legacy_node "$deploy_name"
     install_renew_timer
-    info "已接入 ${deploy_name}，后续只用 HTTPS 采集，部署 SSH 连接即将关闭。"
+    wait_node_scrape "$deploy_name" || die "节点已部署，目标和续期记录已保留，但未确认 Prometheus 采集成功；请按上面的错误排查。"
+    cleanup_legacy_node "$deploy_name"
+    info "已接入 ${deploy_label}，后续只用 HTTPS 采集，部署 SSH 连接即将关闭。"
     info "已验证专用受限续期密钥；证书将在到期前自动续签并同步，无需再次输入登录密码。"
+    info "CPU / 网络速率图需要至少两次采集；Grafana 页面自动刷新后显示。"
 )
 
 renew_node() {
     linux_root
     require_hub
-    local name
+    local name label
     read -r -p "要续签并同步的节点名称: " name
-    valid_name "$name" && [ -f "$DEPLOY_DIR/$name.json" ] || die "没有该节点的自动部署记录，请先用添加/部署节点接入。"
-    confirm "重新签发并自动同步 $name 的证书？" || return 0
+    name="$(node_key "$name")"
+    [ -f "$DEPLOY_DIR/$name.json" ] || die "没有该节点的自动部署记录，请先用添加/部署节点接入。"
+    label="$(jq -r '.node.display_name // .node.name' "$DEPLOY_DIR/$name.json")"
+    confirm "重新签发并自动同步 ${label} 的证书？" || return 0
     renew_managed_node "$DEPLOY_DIR/$name.json"
 }
 

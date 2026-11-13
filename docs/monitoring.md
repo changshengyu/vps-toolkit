@@ -56,7 +56,11 @@ vt monitor hub-install
 vt monitor deploy-node
 ```
 
-按提示填节点名称、直连域名或 IP、监控机公网源 IP、采集端口（默认 19100）、SSH 用户和端口，以及监控机上的 SSH 私钥路径（可留空）。源 IP 会尝试自动检测，NAT 或 IPv6 环境请核对。
+按提示填节点显示名称、直连域名或 IP、监控机公网源 IP、采集端口（默认 19100）、SSH 用户和端口，以及监控机上的 SSH 私钥路径（可留空）。源 IP 会尝试自动检测，NAT 或 IPv6 环境请核对。
+
+节点显示名称支持 **中文、空格、点号和斜杠**，例如 `香港/CMI.01`、`US.CN2 / 备用`，最长 128 个字符（最多 512 字节），不接受换行或控制字符，`client` 为证书操作保留名称。Grafana 使用完整显示名称；工具自动生成稳定的内部标识存储文件和证书，不把显示名称当作路径。原有简短字母数字名称继续使用原标识。添加、移除、续签和手动接入都可以输入同一个显示名称，也可用状态中显示的内部标识定位。
+
+已有节点继续输入**原名称**即可更新，不需要重装；此功能用于放宽新名称输入，不把另一个名称自动识别为原节点的改名。高级手动安装包的文件名使用内部标识，以脚本打印的路径为准。
 
 SSH 私钥路径是**监控机本地**的路径，不是 Mac 路径。留空会尝试默认密钥，也支持由 SSH 自身提示输入密码。密码不经过脚本参数，不会保存。root 可直接安装；非 root 账号需要免密 sudo。
 
@@ -66,14 +70,18 @@ SSH 私钥路径是**监控机本地**的路径，不是 Mac 路径。留空会�
 2. 将证书和当前工具代码快照通过同一 SSH 会话传入远端。
 3. 远端自动安装 / 更新 Node Exporter、mTLS 及独立源 IP 防火墙规则。
 4. 自动安装专用受限续期公钥，并验证它能独立登录，不依赖首次密码、原密钥或 SSH agent。
-5. 验证 HTTPS 指标请求，校验 Prometheus 配置，再登记采集目标。
-6. 删除传输临时文件并关闭 SSH 连接；后续只通过 HTTPS 采集。
+5. 验证 HTTPS 指标请求，校验 Prometheus 配置；需要首次加载 HTTPS 任务时通过 SIGHUP 热加载并确认运行中的任务池已生效，已有任务则直接使用文件发现，不重启 Prometheus / Grafana / Tunnel。
+6. 登记采集目标和续期记录，等待 Prometheus 产生本次新的 `up=1` 样本后确认接入；删除传输临时文件并关闭 SSH 连接，后续只通过 HTTPS 采集。
 
 不会把 CA 私钥、客户端私钥或 SSH 私钥传给节点。新增的续期公钥限定监控机源 IP，只能运行固定的证书更新程序，禁止 Shell、端口转发和 PTY。根据信任的 SSH 连接完成证书引导，无需额外手动比对证书包或在两台机器之间切换菜单。
 
 **已有 UFW / firewalld 或云安全组的默认拒绝规则仍然有效。**需要精确放行“监控机源 IP → 节点 TCP 19100”；工具不覆盖其他防火墙策略，也不会忽略 HTTPS 验证失败。接入失败时保留旧采集目标，关闭本次 SSH 会话；如果远端已安装而云安全组未放行，修复后再次执行第 2 项即可。
 
-同一名称再次执行可更新域名、源 IP、SSH 信息，或为重装后的机器重新部署。以后增加新节点只重复第 2 项。
+同一名称再次执行可更新域名、源 IP、SSH 信息，或为重装后的机器重新部署。以后增加新节点只重复第 2 项，**不需要手动重启整套监控服务**。
+
+默认每 60 秒采集一次。脚本等待最长约 120 秒确认对应节点和地址的本次 `up=1`，不会把旧样本当成本次成功。CPU / 网络等速率图至少需要两次采集，再加 Grafana 自动刷新，接入成功后可能还需等 1～2 分钟看到完整图表。
+
+若直接 HTTPS 验证成功但 Prometheus 未确认采集成功，会明确报错并显示目标 health / lastError，目标和自动续期记录保留供排查；已有旧目标在新采集确认前保留，不会通过反复重启 Grafana 掩盖问题。首次热加载失败会恢复先前磁盘配置并尝试重新加载。
 
 ### 3. 配置 / 打开监控面板
 
@@ -269,7 +277,7 @@ VPS 关机或网络断开期间仍然无法采集，Node Exporter 不补传历�
 
 ## 验证与资料
 
-离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用真实 sshd 和无害的安装桩验证一次认证与安装流，不操作真实 VPS。Tunnel 回归使用模拟 API 验证 DNS 冲突、失败回滚、断网重试及凭据隐藏；`python3 tests/monitoring_tunnel_integration.py` 使用真实 cloudflared CLI 和 Grafana 容器验证 Compose 合并、HTTPS 根地址 / Cookie、暂停后的 SSH 登录和密码保留，不使用真实 Cloudflare 账户。该功能集成测试使用与生产相同的 256 MiB / 0.5 CPU 上限，验证真实账户改名 / 改密、旧密码拒绝、新凭据在域名暂停后保留，以及持久资源覆盖；低配机器仍需观察内存和重启情况。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
+离线回归：`python3 -m unittest discover -s tests -v`。真实 mTLS 集成：`python3 tests/monitoring_https_integration.py`，使用自动清理的临时 Docker 容器，验证首次 SIGHUP 热加载、运行中新增 / 移除特殊名称目标及新 `up=1` 样本，检查容器启动时间及重启次数保持不变。SSH 传输集成：`python3 tests/monitoring_ssh_integration.py`，使用含中文、点号、斜杠显示名称的真实 sshd 和无害安装桩验证一次认证与安装流，不操作真实 VPS。Tunnel 回归使用模拟 API 验证 DNS 冲突、失败回滚、断网重试及凭据隐藏；`python3 tests/monitoring_tunnel_integration.py` 使用真实 cloudflared CLI 和 Grafana 容器验证 Compose 合并、HTTPS 根地址 / Cookie、暂停后的 SSH 登录和密码保留，不使用真实 Cloudflare 账户。该功能集成测试使用与生产相同的 256 MiB / 0.5 CPU 上限，验证真实账户改名 / 改密、旧密码拒绝、新凭据在域名暂停后保留，以及持久资源覆盖；低配机器仍需观察内存和重启情况。防火墙集成在 CI 的独立网络命名空间中执行，验证指定源可连、其他源被丢弃。
 
 - [Node Exporter](https://github.com/prometheus/node_exporter)
 - [Exporter Toolkit TLS 配置](https://github.com/prometheus/exporter-toolkit/blob/master/docs/web-configuration.md)

@@ -8,6 +8,7 @@ NFT_TABLE=vps_toolkit_monitor
 SYSTEMD_DIR="${MONITOR_SYSTEMD_DIR:-/etc/systemd/system}"
 
 package_meta() { python3 "$ROOT_DIR/lib/monitor/package.py" "$@"; }
+node_key() { package_meta name "$1" | jq -r .name; }
 
 sign_leaf() (
     local name="$1" purpose="$2" san="$3" output="$4"
@@ -80,15 +81,18 @@ prepare_node() {
     linux_root
     require_hub
     ensure_packages openssl jq python3
-    local name="${1:-}" address source_ip port metadata
+    local name="${1:-}" address source_ip port metadata display_name
     if [ -z "$name" ]; then read -r -p "节点名称: " name; fi
-    valid_name "$name" || die "节点名称无效。"
-    [ "$name" != client ] || die "client 是客户端续签保留名称，请换一个节点名称。"
+    display_name="$name"
+    name="$(node_key "$display_name")"
+    if [ "$display_name" = "$name" ] && [ -f "$PKI_DIR/nodes/$name/node.json" ]; then
+        display_name="$(jq -r '.display_name // .name' "$PKI_DIR/nodes/$name/node.json")"
+    fi
     read -r -p "节点直连域名或公网 IP（域名须直连解析，不走 CDN）: " address
     read -r -p "监控机访问该节点时的公网源 IP（同一地址族）: " source_ip
     read -r -p "节点 HTTPS 采集端口 [19100]: " port; port="${port:-19100}"
     valid_port "$port" || die "端口无效。"
-    metadata="$(package_meta create "$name" "$address" "$source_ip" "$((10#$port))")"
+    metadata="$(package_meta create "$display_name" "$address" "$source_ip" "$((10#$port))")"
     if [ -e "$PKI_DIR/nodes/$name" ]; then
         confirm "该名称已有证书包；更新地址/源 IP 并重签证书？旧采集目标暂时保留。" || return 0
     fi
@@ -117,12 +121,13 @@ build_node_package() (
 )
 
 write_https_target() {
-    local name="$1" metadata="$PKI_DIR/nodes/$1/node.json" address port target
+    local name="$1" metadata="$PKI_DIR/nodes/$1/node.json" address port target label
     valid_name "$name" || die "节点名称无效。"
     package_meta validate "$metadata" >/dev/null
     address="$(jq -r .address "$metadata")"; port="$(jq -r .port "$metadata")"
     if [[ "$address" == *:* ]]; then target="[$address]:$port"; else target="$address:$port"; fi
-    jq -n --arg name "$name" --arg target "$target" \
+    label="$(jq -r '.display_name // .name' "$metadata")"
+    jq -n --arg name "$label" --arg target "$target" \
         '[{targets:[$target],labels:{node:$name}}]' > "$MONITOR_DIR/prometheus/https-targets/$name.json.tmp"
     chmod 644 "$MONITOR_DIR/prometheus/https-targets/$name.json.tmp"
     mv "$MONITOR_DIR/prometheus/https-targets/$name.json.tmp" "$MONITOR_DIR/prometheus/https-targets/$name.json"
@@ -152,9 +157,67 @@ cleanup_legacy_node() {
     rm -f "$MONITOR_DIR/prometheus/targets/$name.json"
 }
 
+prometheus_api() {
+    local path="$1"; shift
+    curl --noproxy '*' -fsS --connect-timeout 2 --max-time 3 "http://127.0.0.1:9090$path" "$@"
+}
+
+prometheus_wait_ready() {
+    local deadline=$((SECONDS + 60))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if prometheus_api /-/ready >/dev/null 2>&1; then return 0; fi
+        sleep 2
+    done
+    warn "Prometheus 尚未就绪；请查看 monitor logs，不会重启 Grafana 或 Tunnel。"
+    return 1
+}
+
+https_job_loaded() {
+    # status/config returns the main YAML, not expanded scrape_config_files.
+    prometheus_api /api/v1/scrape_pools 2>/dev/null | jq -e '
+        .status == "success" and (.data.scrapePools | index("node-https") != null)' >/dev/null
+}
+
+prometheus_wait_https_job() {
+    local deadline=$((SECONDS + 30))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if https_job_loaded; then return 0; fi
+        sleep 1
+    done
+    warn "Prometheus 未确认加载 HTTPS 任务，配置将恢复；请检查 Prometheus 日志。"
+    return 1
+}
+
+wait_node_scrape() {
+    local name="$1" target label selector query since deadline response
+    valid_name "$name" || die "节点内部标识无效。"
+    target="$(jq -r '.[0].targets[0]' "$MONITOR_DIR/prometheus/https-targets/$name.json")"
+    label="$(jq -r '.[0].labels.node' "$MONITOR_DIR/prometheus/https-targets/$name.json")"
+    selector="$(jq -nr --arg node "$label" --arg instance "$target" '
+        "up{job=\"node-https\",node=\($node|tojson),instance=\($instance|tojson)}"')"
+    since="$(date +%s)"
+    query="($selector == 1) and (timestamp($selector) >= $since)"
+    deadline=$((SECONDS + 120))
+    info "等待 Prometheus 实际采集 ${label}（最长约 120 秒，默认每 60 秒采集）…"
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        if response="$(prometheus_api /api/v1/query --get --data-urlencode "query=$query" 2>/dev/null)" &&
+            printf '%s' "$response" | jq -e '.status == "success" and (.data.result | length > 0)' >/dev/null; then
+            info "Prometheus 已确认 ${label}：up=1，无需手动重启监控服务。"
+            return 0
+        fi
+        sleep 2
+    done
+    warn "目标已登记，但 Prometheus 尚未确认本次采集成功；请检查下面的错误。"
+    prometheus_api '/api/v1/targets?state=active' 2>/dev/null | jq --arg node "$label" '
+        [.data.activeTargets[]? | select(.labels.job == "node-https" and .labels.node == $node) |
+            {node:.labels.node, url:.scrapeUrl, health, lastError, lastScrape}]' || true
+    return 1
+}
+
 activate_https_job() (
     hub_tx_work="$(mktemp -d)"
     hub_tx_had_job=0
+    hub_tx_signaled=0
     cp "$MONITOR_DIR/prometheus/prometheus.yml" "$hub_tx_work/main.yml"
     if [ -f "$MONITOR_DIR/prometheus/https/remote.yml" ]; then
         hub_tx_had_job=1
@@ -170,6 +233,9 @@ activate_https_job() (
             else
                 rm -f "$MONITOR_DIR/prometheus/https/remote.yml"
             fi
+            if [ "$hub_tx_signaled" = 1 ]; then
+                compose kill --signal SIGHUP prometheus >/dev/null 2>&1 || warn "恢复配置后重新加载失败，请检查 Prometheus 日志。"
+            fi
         fi
         rm -rf -- "$hub_tx_work"
         exit "$code"
@@ -177,17 +243,27 @@ activate_https_job() (
     trap rollback_hub EXIT
     enable_https_job
     compose exec -T prometheus /bin/promtool check config /etc/prometheus/prometheus.yml
-    compose restart prometheus
+    prometheus_wait_ready
+    if [ "$hub_tx_had_job" = 0 ] || ! cmp -s "$hub_tx_work/main.yml" "$MONITOR_DIR/prometheus/prometheus.yml" ||
+        ! cmp -s "$hub_tx_work/remote.yml" "$MONITOR_DIR/prometheus/https/remote.yml" || ! https_job_loaded; then
+        info "配置校验通过，正在热加载 Prometheus 采集任务…"
+        hub_tx_signaled=1
+        compose kill --signal SIGHUP prometheus
+        prometheus_wait_https_job
+    else
+        info "HTTPS 任务已加载，新节点通过文件发现自动生效。"
+    fi
 )
 
 add_https_node() {
     linux_root
     require_hub
     ensure_packages curl jq openssl python3
-    local name
-    read -r -p "节点名称（新节点先生成证书包；迁移请用原名称）: " name
-    valid_name "$name" || die "节点名称无效。"
-    if [ ! -f "$PKI_DIR/nodes/$name/node.json" ]; then prepare_node "$name"; fi
+    local name display_name
+    read -r -p "节点名称（新节点先生成证书包；迁移请用原名称）: " display_name
+    name="$(node_key "$display_name")"
+    if [ ! -f "$PKI_DIR/nodes/$name/node.json" ]; then prepare_node "$display_name"; fi
+    display_name="$(jq -r '.display_name // .name' "$PKI_DIR/nodes/$name/node.json")"
     info "请把 $MONITOR_DIR/packages/$name.tar.gz 传到远端，运行 node-install --bundle 安装。"
     confirm "远端已安装并精确放行监控机源 IP，开始 HTTPS 验证？" || return 0
     ensure_pki
@@ -197,8 +273,10 @@ add_https_node() {
     # Start the validated HTTPS job before removing a legacy target.
     activate_https_job
     write_https_target "$name"
+    wait_node_scrape "$name" || die "已安装并登记，但未确认采集成功；目标保留供排查。"
     cleanup_legacy_node "$name"
-    info "已接入 ${name}：HTTPS + mTLS，后续采集不依赖 SSH。"
+    info "已接入 ${display_name}：HTTPS + mTLS，后续采集不依赖 SSH。"
+    info "CPU / 网络速率图需要至少两次采集；Grafana 页面自动刷新后显示。"
 }
 
 install_nft() {
@@ -379,7 +457,8 @@ cert_renew() {
         compose restart prometheus
         info "客户端证书已续签，无需更新节点 CA。"
     else
-        valid_name "$name" && [ -f "$PKI_DIR/nodes/$name/node.json" ] || die "没有这个节点。"
+        name="$(node_key "$name")"
+        [ -f "$PKI_DIR/nodes/$name/node.json" ] || die "没有这个节点。"
         build_node_package "$name"
         info "将新的证书包传到远端并再次 node-install --bundle 安装。"
     fi

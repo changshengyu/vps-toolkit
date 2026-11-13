@@ -155,6 +155,7 @@ require_hub() { :; }
 ensure_packages() { :; }
 ensure_pki() { :; }
 confirm() { return 0; }
+wait_node_scrape() { return 0; }
 activate_https_job() { :; }
 write_https_target() { printf 'https' > "$MONITOR_DIR/prometheus/https-targets/$1.json"; }
 systemctl() { printf '%s\\n' "$*" >> "$CALL_LOG"; }

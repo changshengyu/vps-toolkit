@@ -74,7 +74,7 @@ def main():
         shutil.copyfile(ROOT / "templates/monitoring/prometheus/prometheus.yml",
                         fixture.hub / "prometheus/prometheus.yml")
         (fixture.hub / "prometheus/targets").mkdir(exist_ok=True)
-        fixture.shell('enable_https_job; write_https_target isp-exit')
+        # Start without the HTTPS job; activate it through the actual SIGHUP path below.
         config = fixture.hub / "prometheus/prometheus.yml"
         config.write_text(config.read_text().replace("scrape_interval: 60s", "scrape_interval: 2s").replace("scrape_timeout: 10s", "scrape_timeout: 1s"))
         docker("run", "--detach", "--name", prometheus,
@@ -84,6 +84,24 @@ def main():
                "prom/prometheus:v3.16.0", "--config.file=/etc/prometheus/prometheus.yml",
                "--storage.tsdb.path=/tmp/prometheus", "--web.listen-address=:9090")
         api_port = int(docker("port", exporter, "9090/tcp").rsplit(":", 1)[1])
+        fixture.env.update(PROM_TEST_CONTAINER=prometheus, PROM_API_BASE=f"http://127.0.0.1:{api_port}",
+                           SECOND_LABEL='香港/CMI.01 "备用"')
+        adapters = '''
+prometheus_api() { local path="$1"; shift; curl --noproxy '*' -fsS --max-time 3 "$PROM_API_BASE$path" "$@"; }
+compose() {
+    printf '%s\\n' "$*" >> "$CALL_LOG"
+    case "$1" in
+        exec) shift 3; docker exec "$PROM_TEST_CONTAINER" "$@" ;;
+        kill) docker kill --signal SIGHUP "$PROM_TEST_CONTAINER" ;;
+        *) return 99 ;;
+    esac
+}
+'''
+        before_start = docker("inspect", "--format", "{{.State.StartedAt}}", prometheus)
+        fixture.shell(adapters + "activate_https_job; write_https_target isp-exit; wait_node_scrape isp-exit")
+        assert before_start == docker("inspect", "--format", "{{.State.StartedAt}}", prometheus)
+        assert "kill --signal SIGHUP prometheus" in fixture.log.read_text()
+        print("PASS: real Prometheus hot-loads the HTTPS job without restarting", flush=True)
         query = f"http://127.0.0.1:{api_port}/api/v1/query?query=up%7Bjob%3D%22node-https%22%7D"
         for attempt in range(60):
             if docker("inspect", "--format", "{{.State.Running}}", prometheus) != "true":
@@ -99,6 +117,32 @@ def main():
                 raise AssertionError("Prometheus never successfully scraped the HTTPS target")
             time.sleep(1)
         print("PASS: real Prometheus scrapes Node Exporter over mTLS (up=1)", flush=True)
+        fixture.log.write_text("")
+        fixture.shell(adapters + '''
+activate_https_job
+name="$(node_key "$SECOND_LABEL")"
+mkdir -p "$PKI_DIR/nodes/$name"
+package_meta create "$SECOND_LABEL" 127.0.0.1 127.0.0.1 19100 > "$PKI_DIR/nodes/$name/node.json"
+write_https_target "$name"
+wait_node_scrape "$name"
+''')
+        assert "kill" not in fixture.log.read_text()
+        assert "restart" not in fixture.log.read_text()
+        assert before_start == docker("inspect", "--format", "{{.State.StartedAt}}", prometheus)
+        assert docker("inspect", "--format", "{{.RestartCount}}", prometheus) == "0"
+        print("PASS: a second node with Unicode/slash/dot/quotes is discovered and scraped without reload or restart", flush=True)
+        fixture.shell('name="$(node_key "$SECOND_LABEL")"; rm "$MONITOR_DIR/prometheus/https-targets/$name.json"')
+        for attempt in range(30):
+            with opener().open(f"http://127.0.0.1:{api_port}/api/v1/targets?state=active", timeout=3) as response:
+                targets = json.load(response)["data"]["activeTargets"]
+            if not any(target["labels"].get("node") == fixture.env["SECOND_LABEL"] for target in targets):
+                break
+            if attempt == 29:
+                raise AssertionError("removed node stayed in service discovery")
+            time.sleep(0.5)
+        assert before_start == docker("inspect", "--format", "{{.State.StartedAt}}", prometheus)
+        print("PASS: removing a node updates discovery without restarting", flush=True)
+
         fixture.shell('''
 jq '.address="node.example.test"' "$PKI_DIR/nodes/isp-exit/node.json" > "$PKI_DIR/nodes/isp-exit/node.json.tmp"
 mv "$PKI_DIR/nodes/isp-exit/node.json.tmp" "$PKI_DIR/nodes/isp-exit/node.json"
