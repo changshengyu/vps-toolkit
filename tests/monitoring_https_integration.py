@@ -146,17 +146,40 @@ wait_node_scrape "$name"
         assert before_start == docker("inspect", "--format", "{{.State.StartedAt}}", prometheus)
         assert docker("inspect", "--format", "{{.RestartCount}}", prometheus) == "0"
         print("PASS: a second node with Unicode/slash/dot/quotes is discovered and scraped without reload or restart", flush=True)
-        fixture.shell('name="$(node_key "$SECOND_LABEL")"; rm "$MONITOR_DIR/prometheus/https-targets/$name.json"')
+        fixture.env['RENAMED_LABEL'] = '美国/改名.节点'
+        fixture.shell(adapters + '''
+name="$(node_key "$SECOND_LABEL")"
+node_inventory rename "$name" "$RENAMED_LABEL"
+wait_node_scrape "$name"
+node_inventory pause "$name"
+''')
         for attempt in range(30):
             with opener().open(f"http://127.0.0.1:{api_port}/api/v1/targets?state=active", timeout=3) as response:
                 targets = json.load(response)["data"]["activeTargets"]
-            if not any(target["labels"].get("node") == fixture.env["SECOND_LABEL"] for target in targets):
+            if not any(target["labels"].get("node") in (fixture.env["SECOND_LABEL"], fixture.env['RENAMED_LABEL']) for target in targets):
                 break
             if attempt == 29:
-                raise AssertionError("removed node stayed in service discovery")
+                raise AssertionError("paused node stayed in service discovery")
             time.sleep(0.5)
         assert before_start == docker("inspect", "--format", "{{.State.StartedAt}}", prometheus)
-        print("PASS: removing a node updates discovery without restarting", flush=True)
+        fixture.shell(adapters + '''
+name="$(node_key "$RENAMED_LABEL")"
+node_inventory resume "$name"
+wait_node_scrape "$name"
+linux_root() { :; }; require_hub() { :; }; confirm() { return 0; }
+MONITOR_NODE_ID="$name" remove_node
+''')
+        for attempt in range(30):
+            with opener().open(f"http://127.0.0.1:{api_port}/api/v1/targets?state=active", timeout=3) as response:
+                targets = json.load(response)['data']['activeTargets']
+            if not any(t['labels'].get('node') == fixture.env['RENAMED_LABEL'] for t in targets):
+                break
+            if attempt == 29:
+                raise AssertionError('deleted node stayed in service discovery')
+            time.sleep(.5)
+        assert before_start == docker('inspect', '--format', '{{.State.StartedAt}}', prometheus)
+        assert docker('inspect', '--format', '{{.RestartCount}}', prometheus) == '0'
+        print("PASS: rename/pause/resume/delete update real discovery without restarting or losing node identity", flush=True)
 
         fixture.shell('''
 jq '.address="node.example.test"' "$PKI_DIR/nodes/isp-exit/node.json" > "$PKI_DIR/nodes/isp-exit/node.json.tmp"

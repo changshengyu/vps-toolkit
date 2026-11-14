@@ -67,9 +67,11 @@ MENU_HOME=0
 REPO_RAW_SCRIPT="https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.sh"
 
 # 终端支持时输出颜色
-if [ -t 1 ]; then
+if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
+    C_CYAN=$'\033[36m' C_DIM=$'\033[2m'
     C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_RED=$'\033[31m' C_BOLD=$'\033[1m' C_RESET=$'\033[0m'
 else
+    C_CYAN="" C_DIM=""
     C_GREEN="" C_YELLOW="" C_RED="" C_BOLD="" C_RESET=""
 fi
 
@@ -108,6 +110,7 @@ status_result() {
 }
 
 pause() {
+    [ "$MENU_HOME" -eq 0 ] || return 0
     local answer
     printf '\n'
     read -r -p "回车继续；m 回主菜单；q 退出: " answer || exit 0
@@ -116,7 +119,14 @@ pause() {
 
 # 运行子脚本，失败时提示并返回菜单
 run() {
-    ( "$@" ) || warn "操作未完成（退出码 $?）。"
+    local result=0
+    ( "$@" ) || result=$?
+    case "$result" in
+        0) ;;
+        90) MENU_HOME=1 ;;
+        91) exit 0 ;;
+        *) warn "操作未完成（退出码 $result）。" ;;
+    esac
 }
 
 hy2_install_prompt() {
@@ -224,8 +234,14 @@ opening_commands() {
 
 menu_header() {
     local location="${1:-主菜单}"
+    # Clear the visible screen only. Keep scrollback, noninteractive output and action logs.
+    if [ -t 0 ] && [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ "${VPS_TOOLKIT_CLEAR:-1}" != 0 ]; then
+        printf '\033[H\033[2J'
+    fi
     if [ "$location" != 主菜单 ]; then
-        printf '\n%s  当前位置：%s%s\n' "$C_BOLD" "$location" "$C_RESET"
+        printf '\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$C_CYAN" "$C_RESET"
+        printf '%s  vps-toolkit%s  ·  当前位置：%s\n' "$C_BOLD" "$C_RESET" "$location"
+        printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$C_CYAN" "$C_RESET"
         return 0
     fi
     cat <<HEAD
@@ -240,7 +256,7 @@ HEAD
     configured_panel_summary
     printf '\n'
     opening_commands
-    printf '  更新菜单：退出后重新打开；已打开的菜单不会自动更新。\n'
+    printf '  %s提示：0 返回 · m 主菜单 · q 退出；运行结果按回车后才清屏。%s\n' "$C_DIM" "$C_RESET"
 }
 
 menu_navigation() {
@@ -253,6 +269,14 @@ menu_items() {
     shift
     printf '\n  %s%s%s\n' "$C_BOLD" "$title" "$C_RESET"
     for item in "$@"; do
+        case "$title:$i" in
+            主菜单:1) printf '  %s── 代理节点 ──%s\n' "$C_DIM" "$C_RESET" ;;
+            主菜单:4) printf '\n  %s── 系统与工具 ──%s\n' "$C_DIM" "$C_RESET" ;;
+            主菜单:7) printf '\n  %s── 监控与站点 ──%s\n' "$C_DIM" "$C_RESET" ;;
+            监控管理*:1) printf '  %s── 开始与节点 ──%s\n' "$C_DIM" "$C_RESET" ;;
+            监控管理*:4) printf '\n  %s── 面板与域名 ──%s\n' "$C_DIM" "$C_RESET" ;;
+            监控管理*:6) printf '\n  %s── 运维与恢复 ──%s\n' "$C_DIM" "$C_RESET" ;;
+        esac
         printf '  %s%d.%s %s\n' "$C_GREEN" "$i" "$C_RESET" "$item"
         i=$((i + 1))
     done
@@ -362,20 +386,41 @@ hy2_menu() {
 
 monitor_nodes_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / 节点与证书"
-        info "  新增或重新部署节点：返回监控管理选择 2。"
-        menu_items "节点与证书" \
-            "查看节点证书有效期" \
+        menu_header "主菜单 / 监控管理 / 节点管理"
+        info "  从列表选择节点，统一查看、改名、更新地址、暂停与删除。"
+        menu_items "节点管理" \
+            "查看全部节点" \
+            "添加被监控节点" \
+            "选择节点管理（修改 / 暂停 / 删除）"
+        menu_navigation
+        read_choice 3
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/monitor.sh" nodes-list ;;
+            2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
+            3) run bash "$ROOT_DIR/scripts/monitor.sh" nodes-manage; continue ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+monitor_certificates_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 监控管理 / 证书与手动接入"
+        info "  日常改名、更新、暂停、删除请使用节点管理；这里用于证书与高级接入。"
+        menu_items "证书与手动接入" \
+            "查看全部节点证书有效期" \
             "续签并同步远端节点证书" \
             "续签监控机客户端证书" \
-            "移除节点采集（保留远端服务与历史）"
+            "高级手动接入 >"
         menu_navigation
         read_choice 4
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" cert-status ;;
             2) run bash "$ROOT_DIR/scripts/monitor.sh" renew-node ;;
             3) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew client ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" remove-node ;;
+            4) monitor_manual_menu; continue ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac
@@ -442,7 +487,7 @@ monitor_services_menu() {
 monitor_access_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / 监控管理 / Grafana 面板"
-        info "  域名入口在监控管理第 4 项；这里管理登录和面板本身。"
+        info "  域名入口在监控管理第 5 项；这里管理登录和面板本身。"
         menu_items "Grafana 面板" \
             "查看面板地址与 SSH 访问方法" \
             "修改登录账号 / 密码" \
@@ -521,15 +566,15 @@ monitor_backup_menu() {
 monitor_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / 监控管理"
-        info "  首次：1 安装监控机 → 2 添加节点 → 3 查看面板；配置 HTTPS 域名进入 4。"
+        info "  首次：1 安装 → 2 添加 → 4 查看面板；已有节点进入 3 管理。"
         menu_items "监控管理（Prometheus + Grafana）" \
             "安装监控机（首次，仅一台）" \
-            "添加 / 部署被监控节点（自动流程）" \
+            "添加被监控节点（自动部署）" \
+            "节点管理（列表 / 修改 / 暂停 / 删除）>" \
             "Grafana 面板（访问 / 账号 / 诊断）>" \
             "Cloudflare 域名入口 >" \
             "状态与日志 >" \
-            "节点与证书 >" \
-            "高级手动接入 >" \
+            "证书与手动接入 >" \
             "启动 / 停止 / 重启 / 卸载 >" \
             "备份与恢复（Telegram）>"
         menu_navigation
@@ -537,11 +582,11 @@ monitor_menu() {
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
             2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
-            3) monitor_access_menu; continue ;;
-            4) monitor_tunnel_menu; continue ;;
-            5) monitor_status_menu; continue ;;
-            6) monitor_nodes_menu; continue ;;
-            7) monitor_manual_menu; continue ;;
+            3) monitor_nodes_menu; continue ;;
+            4) monitor_access_menu; continue ;;
+            5) monitor_tunnel_menu; continue ;;
+            6) monitor_status_menu; continue ;;
+            7) monitor_certificates_menu; continue ;;
             8) monitor_services_menu; continue ;;
             9) monitor_backup_menu; continue ;;
             0) return 0 ;;
@@ -569,10 +614,11 @@ help_menu() {
   新建代理节点：主菜单 1 → 1 预览 → 2 部署。
   更新现有节点：主菜单 1 → 3 更新配置。
   监控首次部署：主菜单 7 → 1 安装 → 2 添加节点。
-  配置面板域名：主菜单 7 → 4 → 1。
-  查看面板地址：主菜单 7 → 3 → 1。
-  修改面板账号：主菜单 7 → 3 → 2。
-  排查面板 502：主菜单 7 → 3 → 3；需要调整资源时选择 4。
+  配置面板域名：主菜单 7 → 5 → 1。
+  查看面板地址：主菜单 7 → 4 → 1。
+  修改面板账号：主菜单 7 → 4 → 2。
+  排查面板 502：主菜单 7 → 4 → 3；需要调整资源时选择 4。
+  修改 / 删除节点：主菜单 7 → 3 → 3，从列表选择。
   所有菜单：0 返回上级，m 回主菜单，q 退出。
 GUIDE
                 ;;
