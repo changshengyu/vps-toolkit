@@ -8,7 +8,11 @@ NFT_TABLE=vps_toolkit_monitor
 SYSTEMD_DIR="${MONITOR_SYSTEMD_DIR:-/etc/systemd/system}"
 
 package_meta() { python3 "$ROOT_DIR/lib/monitor/package.py" "$@"; }
-node_key() { package_meta name "$1" | jq -r .name; }
+node_key() {
+    if [ -f "$ROOT_DIR/lib/monitor/nodes.py" ]; then
+        python3 "$ROOT_DIR/lib/monitor/nodes.py" "$MONITOR_DIR" resolve "$1"
+    else package_meta name "$1" | jq -r .name; fi
+}
 
 sign_leaf() (
     local name="$1" purpose="$2" san="$3" output="$4"

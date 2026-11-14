@@ -166,7 +166,7 @@ tunnel_start
         self.assertFalse((self.hub / "compose.tunnel.yaml").exists())
         r = self.shell('monitor_lock() { printf "%s\\n" "$1"; }; main grafana-account')
         self.assertIn("grafana_account", r.stdout)
-        r = subprocess.run(["bash", str(ROOT / "vps.sh")], input="7\n3\n0\n0\n0\n", env=self.env,
+        r = subprocess.run(["bash", str(ROOT / "vps.sh")], input="7\n4\n0\n0\n0\n", env=self.env,
                            text=True, capture_output=True, check=True)
         self.assertIn("2. 修改登录账号 / 密码", r.stdout)
         self.assertIn("4. 调整 Grafana 资源 / 修复启动", r.stdout)

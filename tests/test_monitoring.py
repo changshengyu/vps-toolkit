@@ -65,8 +65,8 @@ class MonitoringTests(MonitoringFixture):
         self.assertIn("6. 使用帮助 / 快捷命令 >", r.stdout)
         self.assertIn("7. 监控管理", r.stdout)
         self.assertIn("1. 安装监控机", r.stdout)
-        self.assertIn("2. 添加 / 部署被监控节点", r.stdout)
-        self.assertIn("3. Grafana 面板（访问 / 账号 / 诊断）>", r.stdout)
+        self.assertIn("2. 添加被监控节点", r.stdout)
+        self.assertIn("4. Grafana 面板（访问 / 账号 / 诊断）>", r.stdout)
 
     def test_rejects_path_traversal_and_config_injection(self):
         self.shell('''

@@ -27,6 +27,8 @@ TUNNEL_UNIT=vps-toolkit-monitor-tunnel@
 . "$ROOT_DIR/lib/monitor/grafana.sh"
 # shellcheck source=../lib/monitor/backup.sh
 . "$ROOT_DIR/lib/monitor/backup.sh"
+# shellcheck source=../lib/monitor/nodes.sh
+. "$ROOT_DIR/lib/monitor/nodes.sh"
 
 show_help() {
     cat <<'HELP'
@@ -34,6 +36,7 @@ show_help() {
 推荐顺序：在监控机执行 hub-install → deploy-node → access
   hub-install                    安装监控机（仅一台）
   deploy-node                    填域名和 SSH 信息，自动安装并接入节点
+  nodes-list|nodes-manage         列表查看 / 选择节点管理（改名、更新、暂停、删除）
   access                         查看面板访问方法
   grafana-account                修改 Grafana 用户名 / 密码
   grafana-check                  检查 Grafana 本机接口和重启 / 资源
@@ -209,15 +212,17 @@ node_install() {
 remove_node() {
     linux_root
     require_hub
-    local name label
-    read -r -p "要移除的节点名称: " label
+    local name label target_label
+    if [ -n "${MONITOR_NODE_ID:-}" ]; then label="$MONITOR_NODE_ID";
+    else read -r -p "要移除的节点名称: " label; fi
     name="$(node_key "$label")"
-    [ -f "$MONITOR_DIR/prometheus/https-targets/$name.json" ] || [ -f "$MONITOR_DIR/prometheus/targets/$name.json" ] || die "没有这个采集目标。"
-    confirm "移除 ${label} 的采集目标？远端服务、历史和证书保留。" || return 0
+    node_inventory list | jq -e --arg id "$name" '.[] | select(.id == $id)' >/dev/null || die "没有这个采集目标。"
+    target_label="$(node_inventory list | jq -r --arg id "$name" '.[] | select(.id == $id) | .label')"
+    confirm "移除 ${target_label} 的采集目标及自动续期登记？远端服务、历史和证书保留。" || return 0
     cleanup_legacy_node "$name"
-    rm -f "$MONITOR_DIR/prometheus/https-targets/$name.json"
-    rm -f "$DEPLOY_DIR/$name.json"
-    info "已移除；远端若不再使用，请在那里卸载采集器。"
+    node_inventory forget "$name"
+    info "已移除采集与自动续期记录；无需重启。远端若不再使用，请在那里卸载采集器。"
+    info "Grafana 状态面板使用 Instant 即时查询；历史曲线仍保留旧数据。"
 }
 
 show_access() {
@@ -235,7 +240,7 @@ show_access() {
 ssh -N -T -p SSH端口 -L 127.0.0.1:13000:127.0.0.1:3000 -L 127.0.0.1:19090:127.0.0.1:9090 用户名@监控机IP
 $grafana_access
 Prometheus：http://127.0.0.1:19090/targets
-修改登录信息：vt monitor grafana-account（监控管理 → 3 Grafana 面板 → 2）。
+修改登录信息：vt monitor grafana-account（监控管理 → 4 Grafana 面板 → 2）。
 安装时初始密码在 $MONITOR_DIR/.env；修改 .env 不会重置已有数据库密码。
 Mac 断开不影响采集。
 ACCESS
@@ -360,6 +365,8 @@ main() {
         prepare-node) monitor_lock prepare_node ;;
         add-node) monitor_lock add_https_node ;;
         remove-node) monitor_lock remove_node ;;
+        nodes-list) require_hub; nodes_list ;;
+        nodes-manage) nodes_manage ;;
         public-key) die "新节点已改用 HTTPS mTLS；请使用 prepare-node，不再生成 SSH 公钥。" ;;
         cert-status) cert_status ;;
         cert-renew) shift; monitor_lock cert_renew "${1:-}" ;;

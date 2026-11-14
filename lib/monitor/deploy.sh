@@ -38,7 +38,7 @@ connect_deployment() {
 build_toolkit_archive() {
     local archive="$1"
     COPYFILE_DISABLE=1 tar -czf "$archive" -C "$ROOT_DIR" \
-        lib/common.sh lib/monitor/package.py lib/monitor/tls.sh \
+        lib/common.sh lib/monitor/package.py lib/monitor/nodes.py lib/monitor/nodes.sh lib/monitor/tls.sh \
         lib/monitor/deploy.sh lib/monitor/hostkeys.py lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/backup.sh lib/monitor/backup.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh scripts/monitor.sh
 }
 
@@ -61,7 +61,8 @@ deploy_node() {
     require_command ssh
     local name display_name address source_ip port user ssh_port identity previous="{}" value detected="" metadata config temporary
     info "节点显示名称支持中文、空格、. 和 /；已有节点使用原名称即可更新。"
-    read -r -p "节点名称（已有节点同名即更新）: " display_name
+    if [ -n "${MONITOR_NODE_ID:-}" ]; then display_name="$MONITOR_NODE_ID";
+    else read -r -p "节点名称（已有节点同名即更新）: " display_name; fi
     name="$(node_key "$display_name")"
     if [ -f "$DEPLOY_DIR/$name.json" ]; then
         previous="$(package_meta deployment "$DEPLOY_DIR/$name.json")"
@@ -80,7 +81,13 @@ deploy_node() {
     value="$(printf '%s' "$previous" | jq -r '.node.port // 19100')"
     read -r -p "节点 HTTPS 端口 [$value]: " port; port="${port:-$value}"
     valid_port "$port" || die "端口无效。"
-    metadata="$(package_meta create "$display_name" "$address" "$source_ip" "$((10#$port))")"
+    # A renamed display label never changes the certificate/renewal identity.
+    value="$(printf '%s' "$previous" | jq -r '.node.display_name // .node.name // empty')"
+    if [ -z "$value" ] && [ -f "$PKI_DIR/nodes/$name/node.json" ]; then
+        value="$(jq -r '.display_name // .name' "$PKI_DIR/nodes/$name/node.json")"
+    fi
+    if [ -z "$value" ] && node_inventory list | jq -e --arg id "$name" '.[] | select(.id == $id)' >/dev/null; then value="$name"; fi
+    metadata="$(package_meta create "${value:-$display_name}" "$address" "$source_ip" "$((10#$port))")"
     package_meta resolve "$address" "$source_ip" >/dev/null || die "域名没有匹配源 IP 地址族的解析，请确认直连 A/AAAA 记录。"
     value="$(printf '%s' "$previous" | jq -r '.ssh.user // "root"')"
     read -r -p "远端 SSH 用户 [$value]: " user; user="${user:-$value}"
@@ -178,6 +185,7 @@ apply_deployment() (
     chmod 600 "$DEPLOY_DIR/$deploy_name.json.tmp"
     mv "$DEPLOY_DIR/$deploy_name.json.tmp" "$DEPLOY_DIR/$deploy_name.json"
     write_https_target "$deploy_name"
+    node_inventory relabel "$deploy_name"
     install_renew_timer
     wait_node_scrape "$deploy_name" || die "节点已部署，目标和续期记录已保留，但未确认 Prometheus 采集成功；请按上面的错误排查。"
     cleanup_legacy_node "$deploy_name"
@@ -190,7 +198,8 @@ renew_node() {
     linux_root
     require_hub
     local name label
-    read -r -p "要续签并同步的节点名称: " name
+    if [ -n "${MONITOR_NODE_ID:-}" ]; then name="$MONITOR_NODE_ID";
+    else read -r -p "要续签并同步的节点名称: " name; fi
     name="$(node_key "$name")"
     [ -f "$DEPLOY_DIR/$name.json" ] || die "没有该节点的自动部署记录，请先用添加/部署节点接入。"
     label="$(jq -r '.node.display_name // .node.name' "$DEPLOY_DIR/$name.json")"
@@ -202,7 +211,7 @@ install_renew_timer() {
     install -d -m 755 "$MONITOR_DIR/toolkit/scripts" "$MONITOR_DIR/toolkit/lib/monitor" "$MONITOR_DIR/toolkit/templates/monitoring"
     local path
     if [ ! "$ROOT_DIR" -ef "$MONITOR_DIR/toolkit" ]; then
-        for path in lib/common.sh scripts/monitor.sh lib/monitor/tls.sh lib/monitor/package.py lib/monitor/deploy.sh lib/monitor/hostkeys.py lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/backup.sh lib/monitor/backup.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh; do
+        for path in lib/common.sh scripts/monitor.sh lib/monitor/tls.sh lib/monitor/package.py lib/monitor/nodes.py lib/monitor/nodes.sh lib/monitor/deploy.sh lib/monitor/hostkeys.py lib/monitor/renew.sh lib/monitor/tunnel.sh lib/monitor/cloudflare.py lib/monitor/grafana.sh lib/monitor/grafana.py lib/monitor/backup.sh lib/monitor/backup.py lib/monitor/restricted-renew.sh lib/monitor/remote-install.sh; do
             install -m 644 "$ROOT_DIR/$path" "$MONITOR_DIR/toolkit/$path"
         done
         cp -R "$ROOT_DIR/templates/monitoring/." "$MONITOR_DIR/toolkit/templates/monitoring/"
@@ -245,6 +254,7 @@ renew_due() {
         [ -f "$config" ] || continue
         package_meta deployment "$config" >/dev/null
         name="$(jq -r .node.name "$config")"
+        if [ -f "$MONITOR_DIR/nodes/$name.json" ] && jq -e '.paused == true' "$MONITOR_DIR/nodes/$name.json" >/dev/null; then continue; fi
         if openssl x509 -in "$PKI_DIR/nodes/$name/server.pem" -checkend 2592000 -noout >/dev/null; then continue; fi
         automatic="$(jq -r .auto_renew "$config")"
         if [ "$automatic" != true ]; then

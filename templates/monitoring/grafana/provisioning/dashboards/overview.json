@@ -68,7 +68,8 @@
           "refId": "A",
           "expr": "up{job=~\"node|node-https\"}",
           "legendFormat": "{{node}}",
-          "range": true
+          "range": false,
+          "instant": true
         }
       ],
       "options": {

@@ -1,10 +1,13 @@
 """Run menus with harmless child scripts; never contact services or install to /usr."""
 import json
 import os
+import pty
+import select
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,12 +81,13 @@ exit "${MENU_ACTION_EXIT:-0}"
     def test_all_monitor_routes_dispatch_the_expected_operation(self):
         routes = {
             (1,): ["hub-install"], (2,): ["deploy-node"],
-            (3, 1): ["access"], (3, 2): ["grafana-account"], (3, 3): ["grafana-check"], (3, 4): ["grafana-resources"],
-            (4, 1): ["tunnel-setup"], (4, 2): ["tunnel-status"], (4, 3): ["tunnel-logs"],
-            (4, 4): ["tunnel-start"], (4, 5): ["tunnel-stop"], (4, 6): ["tunnel-remove"],
-            (5, 1): ["status"], (5, 2): ["logs"],
-            (6, 1): ["cert-status"], (6, 2): ["renew-node"], (6, 3): ["cert-renew", "client"], (6, 4): ["remove-node"],
-            (7, 1): ["prepare-node"], (7, 2): ["node-install"], (7, 3): ["add-node"],
+            (4, 1): ["access"], (4, 2): ["grafana-account"], (4, 3): ["grafana-check"], (4, 4): ["grafana-resources"],
+            (5, 1): ["tunnel-setup"], (5, 2): ["tunnel-status"], (5, 3): ["tunnel-logs"],
+            (5, 4): ["tunnel-start"], (5, 5): ["tunnel-stop"], (5, 6): ["tunnel-remove"],
+            (6, 1): ["status"], (6, 2): ["logs"],
+            (7, 1): ["cert-status"], (7, 2): ["renew-node"], (7, 3): ["cert-renew", "client"],
+            (3, 1): ["nodes-list"], (3, 2): ["deploy-node"], (3, 3): ["nodes-manage"],
+            (7, 4, 1): ["prepare-node"], (7, 4, 2): ["node-install"], (7, 4, 3): ["add-node"],
             (8, 1): ["start"], (8, 2): ["stop"], (8, 3): ["restart"], (8, 4): ["uninstall"],
             (9, 1): ["backup-setup"], (9, 2): ["backup-run"], (9, 3): ["backup-status"], (9, 4): ["backup-logs"],
             (9, 5): ["backup-restore"], (9, 6): ["backup-pause"], (9, 7): ["backup-resume"],
@@ -139,17 +143,17 @@ exit "${MENU_ACTION_EXIT:-0}"
     def test_back_returns_one_level_and_direct_monitor_can_go_home(self):
         result = self.run_menu("7\n4\n0\n0\nq\n")
         self.assertEqual(result.stdout.count("  监控管理（Prometheus + Grafana）\n"), 2)
-        result = self.run_menu("3\nm\nq\n", "monitor")
+        result = self.run_menu("4\nm\nq\n", "monitor")
         self.assertIn("当前位置：主菜单 / 监控管理 / Grafana 面板", result.stdout)
         self.assertEqual(result.stdout.count("  主菜单\n"), 1)
         self.assertEqual(self.records(), [])
 
     def test_failed_actions_stay_on_their_page_and_pause_supports_home(self):
-        result = self.run_menu("7\n3\n1\n\nq\n", extra={"MENU_ACTION_EXIT": "42"})
+        result = self.run_menu("7\n4\n1\n\nq\n", extra={"MENU_ACTION_EXIT": "42"})
         self.assertIn("退出码 42", result.stderr)
         self.assertEqual(result.stdout.count("当前位置：主菜单 / 监控管理 / Grafana 面板"), 2)
         self.calls.unlink()
-        result = self.run_menu("7\n3\n1\nm\nq\n")
+        result = self.run_menu("7\n4\n1\nm\nq\n")
         self.assertEqual(result.stdout.count("  主菜单\n"), 2)
         self.assertEqual(len(self.records()), 1)
 
@@ -181,6 +185,53 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.calls.unlink()
         self.run_menu("", "monitor", "cert-renew", "client")
         self.assertEqual(self.records()[0]["args"], ["cert-renew", "client"])
+
+    def terminal(self, extra=None, args=()):
+        master, slave = pty.openpty()
+        process = subprocess.Popen(['bash', str(self.repo / 'vps.sh'), *args], stdin=slave, stdout=slave,
+            stderr=slave, env={**self.env, 'TERM': 'xterm-256color', **(extra or {})})
+        os.close(slave)
+        os.write(master, b'q\n')
+        data = b''
+        deadline = time.monotonic() + 8
+        try:
+            while time.monotonic() < deadline:
+                if select.select([master], [], [], .1)[0]:
+                    try:
+                        block = os.read(master, 65536)
+                    except OSError:
+                        break
+                    if not block:
+                        break
+                    data += block
+            process.wait(timeout=2)
+            self.assertEqual(process.returncode, 0)
+        finally:
+            if process.poll() is None:
+                process.kill()
+            os.close(master)
+        return data
+
+    def test_real_terminal_clear_colors_and_accessibility_switches(self):
+        self.env.pop('NO_COLOR', None)
+        self.env.pop('VPS_TOOLKIT_CLEAR', None)
+        output = self.terminal()
+        self.assertIn(b'\x1b[H\x1b[2J', output)
+        self.assertIn(b'\x1b[32m', output)
+        self.assertNotIn(b'\x1b[3J', output)  # Never erase scrollback.
+        self.assertNotIn(b'\x1b[32m', self.terminal({'NO_COLOR': '1'}))
+        self.assertNotIn(b'\x1b[2J', self.terminal({'VPS_TOOLKIT_CLEAR': '0'}))
+        self.assertNotIn(b'\x1b[', self.terminal({'TERM': 'dumb'}))
+        self.assertNotIn(b'\x1b[', self.terminal(args=('help',)))
+        redirected = self.run_menu('q\n', extra={'TERM': 'xterm-256color'})
+        self.assertNotIn('\x1b[', redirected.stdout)
+
+    def test_node_manager_can_return_home_or_quit_without_extra_pause(self):
+        output = self.run_menu('7\n3\n3\nq\n', extra={'MENU_ACTION_EXIT': '90'})
+        self.assertEqual(output.stdout.count('  主菜单\n'), 2)
+        self.calls.unlink()
+        self.run_menu('7\n3\n3\n', extra={'MENU_ACTION_EXIT': '91'})
+        self.assertEqual(self.records()[0]['args'], ['nodes-manage'])
 
 
 if __name__ == "__main__":

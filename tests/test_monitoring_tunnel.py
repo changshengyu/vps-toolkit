@@ -330,7 +330,7 @@ tunnel_setup
         self.assertNotIn("test-private-api-token", r.stdout + r.stderr + self.log.read_text())
 
     def test_access_submenu_and_cli_routes(self):
-        r = subprocess.run(["bash", str(ROOT / "vps.sh")], input="7\n4\n0\n0\n0\n",
+        r = subprocess.run(["bash", str(ROOT / "vps.sh")], input="7\n5\n0\n0\n0\n",
                            text=True, capture_output=True, env=self.env, check=True)
         self.assertIn("1. 配置 Grafana 域名入口", r.stdout)
         self.assertIn("6. 移除域名入口", r.stdout)
