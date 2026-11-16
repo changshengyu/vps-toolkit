@@ -69,7 +69,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 
 ```text
 主菜单
-├─ 1. 节点部署 >        1 预览 → 2 部署；3 更新配置；4 覆盖重部署；5 查看结果
+├─ 1. 节点部署 >        1 编辑并预览 → 2 编辑并部署；3 修改分流；4 编辑并重部署；5 查看结果
 ├─ 2. 3x-ui 面板 >      安装 / 状态 / 路由 / geodata 更新
 ├─ 3. Hysteria2 端口跳跃 >  安装或更新 / 状态 / 卸载
 ├─ 4. 系统设置（IPv6）>    查看状态 / 开启 / 关闭
@@ -140,6 +140,8 @@ bash vps.sh tools               # 打开工具箱
 ## 重装系统前
 
 参数和密钥保存在 `/root/.vps-toolkit/state.env`（权限 600，包含 Reality 私钥、CF Token 和 SS 密码，请妥善保管），重跑脚本时直接复用，客户端里的节点保持可用。重装系统前把它备份出来，重装后放回原处再运行 `deploy`，就不用重新导入节点。
+
+修改域名、CF Token、端口或出站参数，选择主菜单 **1 → 1/2/3/4**，都可先按编号编辑，再预览或确认执行。回车保留其他参数；无需删除状态文件或重新生成已有密钥。也可运行 `vt deploy --edit --replace`。
 
 想更换全部密钥（例如链接泄露后），运行 `deploy --regen --replace`。
 

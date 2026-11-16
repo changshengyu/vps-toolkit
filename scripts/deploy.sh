@@ -9,7 +9,7 @@ trap 'rc=$?; printf "错误：%s 第 %s 行命令失败（退出码 %s）：%s\n
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/common.sh
 . "$ROOT_DIR/lib/common.sh"
-for _lib in params keys render firewall cert panel; do
+for _lib in params keys render firewall cert panel editor; do
     # shellcheck source=/dev/null
     . "$ROOT_DIR/lib/deploy/$_lib.sh"
 done
@@ -21,6 +21,7 @@ STATE_FILE="$DEPLOY_HOME/state.env"
 RESULT_FILE="${RESULT_FILE:-/root/vps-deploy-result.txt}"
 DRY_RUN=0
 ASK_ALL=0
+EDIT_PARAMS=0
 ASSUME_YES=0
 REGEN=0
 REPLACE=""
@@ -43,6 +44,7 @@ show_help() {
   --config-only        只更新已有 3x-ui 的出站、路由和 geodata，不动入站、证书和面板
   --out 目录           预览输出目录（默认 ./deploy-preview）
   -i, --ask-all        逐项询问全部参数（回车使用默认值）
+  --edit              编号编辑本次参数，完成后预览 / 确认部署；保留已有密钥
   -c, --config 文件    配置文件（默认 $CONFIG_FILE）
   --regen              忽略上次生成的值，重新生成全部密钥
   --replace            同端口已有入站时直接覆盖（默认询问；非交互时跳过）
@@ -75,6 +77,7 @@ parse_args() {
             --out) OUT_DIR="${2:?--out 需要目录}"; shift ;;
             --out=*) OUT_DIR="${arg#*=}" ;;
             -i | --ask-all) ASK_ALL=1 ;;
+            --edit) EDIT_PARAMS=1 ;;
             -c | --config) CONFIG_FILE="${2:?--config 需要文件}"; shift ;;
             --config=*) CONFIG_FILE="${arg#*=}" ;;
             --regen) REGEN=1 ;;
@@ -101,8 +104,8 @@ parse_args() {
         shift
     done
 
-    if [ "$ASK_ALL" = "1" ] && [ "$INTERACTIVE" != "1" ]; then
-        die "--ask-all 需要在终端中运行。"
+    if { [ "$ASK_ALL" = "1" ] || [ "$EDIT_PARAMS" = "1" ]; } && [ "$INTERACTIVE" != "1" ]; then
+        die "--ask-all / --edit 需要在终端中运行。"
     fi
 }
 
@@ -220,6 +223,8 @@ run_config_only() {
     rm -rf "$PREVIEW_DIR"
     restart_xray
 
+    save_config_state "$STATE_FILE"
+
     info ""
     info "配置已更新。可在面板「路由 → 路由测试」中验证：baidu.com 应为 blocked，www.gstatic.com 应为 direct。"
 }
@@ -310,10 +315,7 @@ main() {
     if [ "$CONFIG_ONLY" = "1" ]; then
         [ "$DRY_RUN" != "1" ] || die "--config-only 不能和 --dry-run 同时使用。"
         panel_installed || die "未安装 3x-ui，--config-only 只能用于已有面板。"
-        collect_params
-        detect_existing_panel
-        validate_config_params
-        print_summary
+        prepare_deploy_params
         print_config_plan
         if [ "$ASSUME_YES" != "1" ]; then
             [ "$INTERACTIVE" = "1" ] || die "非交互运行时请加 -y 确认。"
@@ -326,10 +328,7 @@ main() {
         return 0
     fi
 
-    collect_params
-    detect_existing_panel
-    validate_params
-    print_summary
+    prepare_deploy_params
 
     if [ "$DRY_RUN" = "1" ]; then
         run_dry_run

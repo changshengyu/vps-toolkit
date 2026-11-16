@@ -101,8 +101,8 @@ exit "${MENU_ACTION_EXIT:-0}"
 
     def test_existing_proxy_and_network_actions_keep_correct_arguments(self):
         routes = [
-            ("1\n1\n", "deploy.sh", ["--dry-run"]), ("1\n2\n", "deploy.sh", []),
-            ("1\n3\n", "deploy.sh", ["--config-only"]), ("1\n4\n", "deploy.sh", ["--replace"]),
+            ("1\n1\n", "deploy.sh", ["--dry-run", "--edit"]), ("1\n2\n", "deploy.sh", ["--edit"]),
+            ("1\n3\n", "deploy.sh", ["--config-only", "--edit"]), ("1\n4\n", "deploy.sh", ["--replace", "--edit"]),
             ("2\n1\n", "3x-ui.sh", ["install"]), ("2\n2\n", "3x-ui.sh", ["status"]),
             ("2\n3\n", "xui-routing.sh", ["IPIfNonMatch"]), ("2\n4\n1\n", "xui-geodata.sh", []),
             ("2\n4\n2\n0 3 * * 1\n", "xui-geodata.sh", ["0 3 * * 1"]),

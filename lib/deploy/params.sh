@@ -213,10 +213,10 @@ prompt_value() {
     fi
 
     if [ "$hidden" = "1" ]; then
-        read -r -s -p "$desc: " answer || true
+        read -r -s -p "$desc: " answer || { printf '\n' >&2; return 1; }
         printf '\n' >&2
     else
-        read -r -p "$desc: " answer || true
+        read -r -p "$desc: " answer || return 1
     fi
     printf -v "$var" '%s' "${answer:-$def}"
 }
@@ -257,11 +257,13 @@ collect_params() {
 
         if [ -z "$source" ] || [ "$ASK_ALL" = "1" ]; then
             [ -z "$value" ] && value="$(resolve_default "$def")"
-            if [ "$INTERACTIVE" = "1" ] && { [ "$ASK_ALL" = "1" ] || { is_required "$kind" && [ -z "$value" ]; }; }; then
+            if [ "$INTERACTIVE" = "1" ] && ! panel_parameter_locked "$var" && { [ "$ASK_ALL" = "1" ] || { is_required "$kind" && [ -z "$value" ]; }; }; then
                 local tries=0 problem
                 while :; do
-                    prompt_value "$var" "$desc" "$value" "$hidden"
+                    local previous="$value"
+                    prompt_value "$var" "$desc" "$value" "$hidden" || die "输入结束，已取消。"
                     value="${!var}"
+                    if [ "$value" != "$previous" ]; then source="交互输入"; fi
                     problem="$(check_param "$var" "$value")"
                     [ -z "$problem" ] && break
                     warn "$problem"
