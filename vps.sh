@@ -295,20 +295,21 @@ read_choice() {
 deploy_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / 节点部署与更新"
-        info "  首次先预览，再正式部署；已有机器更新出站和路由请选择 3。"
+        info "  每次先进入参数编辑器：输入编号修改，0 完成后看计划；q 取消。"
+        info "  修改入站或域名选 4；只改 AI 分流 / SS 出站选 3。"
         menu_items "节点部署与更新" \
-            "预览部署配置（不改动系统）" \
-            "一键部署节点" \
-            "更新现有节点配置（不改入站）" \
-            "重新部署并覆盖同端口入站" \
+            "修改参数并预览（不改动系统）" \
+            "编辑参数并部署节点" \
+            "修改出站 / AI 分流参数（不改入站）" \
+            "编辑参数并重部署（覆盖同端口入站）" \
             "查看部署结果（面板地址、分享链接）"
         menu_navigation
         read_choice 5
         case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/deploy.sh" --dry-run ;;
-            2) run bash "$ROOT_DIR/scripts/deploy.sh" ;;
-            3) run bash "$ROOT_DIR/scripts/deploy.sh" --config-only ;;
-            4) run bash "$ROOT_DIR/scripts/deploy.sh" --replace ;;
+            1) run bash "$ROOT_DIR/scripts/deploy.sh" --dry-run --edit ;;
+            2) run bash "$ROOT_DIR/scripts/deploy.sh" --edit ;;
+            3) run bash "$ROOT_DIR/scripts/deploy.sh" --config-only --edit ;;
+            4) run bash "$ROOT_DIR/scripts/deploy.sh" --replace --edit ;;
             5) run show_result ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
