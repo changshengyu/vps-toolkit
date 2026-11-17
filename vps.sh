@@ -53,7 +53,7 @@ show_help() {
   geodata [cron|off]         开启 / 关闭 3x-ui 的 geodata 自动更新
   result                     查看上次部署结果
   ipv6 status|enable|disable 查看 / 开启 / 关闭系统 IPv6
-  monitor [操作]             管理 Prometheus / Grafana 监控（help 查看操作）
+  monitor [操作]             旧监控兼容命令（uninstall 卸载旧服务）
   komari [操作]              部署 Komari 服务端 / Agent / 域名入口
   sni-site [操作]            ISP HTTPS 静态站点 / Reality SNI（help 查看操作）
   shortcut                   安装快捷命令 vt
@@ -175,13 +175,9 @@ SCRIPT
 
 # Menu summaries read local state only; never source .env or query external APIs.
 status_monitor_role() {
-    if [ -f "${MONITOR_DIR:-/opt/vps-toolkit-monitor}/.vps-toolkit-managed" ]; then
-        printf '监控机'
-    elif [ -f "/usr/local/lib/vps-toolkit-monitor/.vps-toolkit-managed" ]; then
-        printf '被监控节点'
-    elif [ -f /opt/vps-toolkit-komari/config/server.json ]; then
+    if [ -f /opt/vps-toolkit-komari/config/server.json ]; then
         printf 'Komari 监控机'
-    elif [ -f /opt/vps-toolkit-komari/config/agent.json ]; then
+    elif [ -f /opt/vps-toolkit-komari/config/agent.json ] || [ -f /etc/systemd/system/komari-agent.service ]; then
         printf 'Komari Agent'
     else
         printf '未部署监控'
@@ -216,25 +212,11 @@ machine_summary() {
     fi
 }
 
-configured_panel_summary() {
-    local directory="${MONITOR_DIR:-/opt/vps-toolkit-monitor}" domain=""
-    if [ -r "$directory/tunnel/state.json" ] && command -v jq >/dev/null 2>&1; then
-        domain="$(jq -r 'select(.configured == true) | .domain // empty' "$directory/tunnel/state.json" 2>/dev/null || true)"
-    fi
-    if [[ "$domain" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9]$ ]]; then
-        if [ -f "$directory/compose.tunnel.yaml" ]; then
-            printf '  Grafana 配置入口：https://%s/（健康状态见监控菜单）\n' "$domain"
-        else
-            printf '  Grafana 域名：https://%s/（入口已暂停）\n' "$domain"
-        fi
-    fi
-}
-
 opening_commands() {
     printf '  在线打开（可复制）：\n'
     printf 'bash <(curl -fsSL %s)\n' "$REPO_RAW_SCRIPT"
     printf '  快捷命令：%s\n' "$(status_shortcut)"
-    printf '  常用命令（安装 vt 后）：vt komari  |  vt monitor  |  vt help\n'
+    printf '  常用命令（安装 vt 后）：vt komari  |  vt help\n'
 }
 
 menu_header() {
@@ -258,7 +240,6 @@ HEAD
     machine_summary
     printf '  3x-ui：%s  端口跳跃：%s  IPv6：%s  部署结果：%s\n' "$(status_xui)" "$(status_hop)" "$(status_ipv6)" "$(status_result)"
     printf '  监控角色：%s\n' "$(status_monitor_role)"
-    configured_panel_summary
     printf '\n'
     opening_commands
     printf '  %s提示：0 返回 · m 主菜单 · q 退出；运行结果按回车后才清屏。%s\n' "$C_DIM" "$C_RESET"
@@ -278,9 +259,6 @@ menu_items() {
             主菜单:1) printf '  %s── 代理节点 ──%s\n' "$C_DIM" "$C_RESET" ;;
             主菜单:4) printf '\n  %s── 系统与工具 ──%s\n' "$C_DIM" "$C_RESET" ;;
             主菜单:7) printf '\n  %s── 监控与站点 ──%s\n' "$C_DIM" "$C_RESET" ;;
-            监控管理*:1) printf '  %s── 开始与节点 ──%s\n' "$C_DIM" "$C_RESET" ;;
-            监控管理*:4) printf '\n  %s── 面板与域名 ──%s\n' "$C_DIM" "$C_RESET" ;;
-            监控管理*:6) printf '\n  %s── 运维与恢复 ──%s\n' "$C_DIM" "$C_RESET" ;;
         esac
         printf '  %s%d.%s %s\n' "$C_GREEN" "$i" "$C_RESET" "$item"
         i=$((i + 1))
@@ -390,218 +368,6 @@ hy2_menu() {
     done
 }
 
-monitor_nodes_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / 节点管理"
-        info "  从列表选择节点，统一查看、改名、更新地址、暂停与删除。"
-        menu_items "节点管理" \
-            "查看全部节点" \
-            "添加被监控节点" \
-            "选择节点管理（修改 / 暂停 / 删除）"
-        menu_navigation
-        read_choice 3
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" nodes-list ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" nodes-manage; continue ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_certificates_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / 证书与手动接入"
-        info "  日常改名、更新、暂停、删除请使用节点管理；这里用于证书与高级接入。"
-        menu_items "证书与手动接入" \
-            "查看全部节点证书有效期" \
-            "续签并同步远端节点证书" \
-            "续签监控机客户端证书" \
-            "高级手动接入 >"
-        menu_navigation
-        read_choice 4
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" cert-status ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" renew-node ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" cert-renew client ;;
-            4) monitor_manual_menu; continue ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_manual_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / 高级手动接入"
-        info "  手动顺序：监控机生成包 → 被监控机安装 → 监控机验证接入。"
-        menu_items "高级手动接入（自行传输证书包）" \
-            "生成节点证书包（在监控机）" \
-            "安装采集器和证书包（在被监控机）" \
-            "验证并接入已安装的节点（在监控机）"
-        menu_navigation
-        read_choice 3
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" prepare-node ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" node-install ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" add-node ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_status_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / 状态与日志"
-        menu_items "状态与日志" "查看服务、节点与资源占用" "查看监控日志"
-        menu_navigation
-        read_choice 2
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" status ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" logs ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_services_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / 服务管理"
-        menu_items "监控服务管理（本机）" \
-            "启动" "停止" "重启" "卸载服务（保留数据）"
-        menu_navigation
-        read_choice 4
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" start ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" stop ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" restart ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" uninstall ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_access_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / Grafana 面板"
-        info "  域名入口在监控管理第 5 项；这里管理登录和面板本身。"
-        menu_items "Grafana 面板" \
-            "查看面板地址与 SSH 访问方法" \
-            "修改登录账号 / 密码" \
-            "检查面板健康（502 / 无法连接）" \
-            "调整 Grafana 资源 / 修复启动"
-        menu_navigation
-        read_choice 4
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" access ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-account ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-check ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" grafana-resources ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_tunnel_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / Cloudflare 域名入口"
-        info "  入口转发到本机 Grafana；无需开放公网 3000 或占用 80/443。"
-        menu_items "Cloudflare 域名入口" \
-            "配置 Grafana 域名入口（自动创建 Tunnel）" \
-            "查看域名入口状态" \
-            "查看域名入口日志" \
-            "恢复域名入口" \
-            "暂停域名入口，恢复 SSH 访问" \
-            "移除域名入口（保留监控数据）"
-        menu_navigation
-        read_choice 6
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-setup ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-status ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-logs ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-start ;;
-            5) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-stop ;;
-            6) run bash "$ROOT_DIR/scripts/monitor.sh" tunnel-remove ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_backup_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理 / 备份与恢复"
-        info "  加密后发给 Telegram Bot；解密密钥另存 Mac。恢复仅用于全新监控机。"
-        menu_items "备份与恢复（Telegram）" \
-            "配置 Telegram 自动备份" \
-            "立即备份并发送" \
-            "查看备份状态" \
-            "查看备份日志" \
-            "从备份恢复（全新监控机）" \
-            "暂停自动备份" \
-            "恢复自动备份"
-        menu_navigation
-        read_choice 7
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" backup-setup ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" backup-run ;;
-            3) run bash "$ROOT_DIR/scripts/monitor.sh" backup-status ;;
-            4) run bash "$ROOT_DIR/scripts/monitor.sh" backup-logs ;;
-            5) run bash "$ROOT_DIR/scripts/monitor.sh" backup-restore ;;
-            6) run bash "$ROOT_DIR/scripts/monitor.sh" backup-pause ;;
-            7) run bash "$ROOT_DIR/scripts/monitor.sh" backup-resume ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
-monitor_menu() {
-    while [ "$MENU_HOME" -eq 0 ]; do
-        menu_header "主菜单 / 监控管理"
-        info "  首次：1 安装 → 2 添加 → 4 查看面板；已有节点进入 3 管理。"
-        menu_items "监控管理（Prometheus + Grafana）" \
-            "安装监控机（首次，仅一台）" \
-            "添加被监控节点（自动部署）" \
-            "节点管理（列表 / 修改 / 暂停 / 删除）>" \
-            "Grafana 面板（访问 / 账号 / 诊断）>" \
-            "Cloudflare 域名入口 >" \
-            "状态与日志 >" \
-            "证书与手动接入 >" \
-            "启动 / 停止 / 重启 / 卸载 >" \
-            "备份与恢复（Telegram）>"
-        menu_navigation
-        read_choice 9
-        case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/monitor.sh" hub-install ;;
-            2) run bash "$ROOT_DIR/scripts/monitor.sh" deploy-node ;;
-            3) monitor_nodes_menu; continue ;;
-            4) monitor_access_menu; continue ;;
-            5) monitor_tunnel_menu; continue ;;
-            6) monitor_status_menu; continue ;;
-            7) monitor_certificates_menu; continue ;;
-            8) monitor_services_menu; continue ;;
-            9) monitor_backup_menu; continue ;;
-            0) return 0 ;;
-            *) warn "无效选项：$CHOICE"; continue ;;
-        esac
-        pause
-    done
-}
-
 help_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / 使用帮助与快捷命令"
@@ -619,12 +385,7 @@ help_menu() {
                 cat <<'GUIDE'
   新建代理节点：主菜单 1 → 1 预览 → 2 部署。
   更新现有节点：主菜单 1 → 3 更新配置。
-  监控首次部署：主菜单 7 → 1 安装 → 2 添加节点。
-  配置面板域名：主菜单 7 → 5 → 1。
-  查看面板地址：主菜单 7 → 4 → 1。
-  修改面板账号：主菜单 7 → 4 → 2。
-  排查面板 502：主菜单 7 → 4 → 3；需要调整资源时选择 4。
-  修改 / 删除节点：主菜单 7 → 3 → 3，从列表选择。
+  Komari：监控机选 7 → 1，被监控机选 7 → 2；面板地址选 7 → 3。
   所有菜单：0 返回上级，m 回主菜单，q 退出。
 GUIDE
                 ;;
@@ -784,11 +545,10 @@ main_menu() {
             "系统设置（IPv6）>" \
             "VPS 多功能工具箱" \
             "使用帮助 / 快捷命令 >" \
-            "监控管理（Prometheus + Grafana）>" \
-            "ISP HTTPS 静态站点（Reality SNI）>" \
-            "Komari 监控（服务端 / Agent / 域名）>"
+            "Komari 监控（服务端 / Agent / 域名）>" \
+            "ISP HTTPS 静态站点（Reality SNI）>"
         menu_navigation 退出
-        read_choice 9
+        read_choice 8
         case "$CHOICE" in
             1) deploy_menu ;;
             2) xui_menu ;;
@@ -796,9 +556,8 @@ main_menu() {
             4) system_menu ;;
             5) run bash "$ROOT_DIR/scripts/vps-tools.sh"; pause ;;
             6) help_menu ;;
-            7) monitor_menu ;;
+            7) komari_menu ;;
             8) sni_site_menu ;;
-            9) komari_menu ;;
             0) if [ "$MENU_HOME" -eq 1 ]; then continue; fi; exit 0 ;;
             *) warn "无效选项：$CHOICE" ;;
         esac
@@ -820,8 +579,7 @@ case "${1:-menu}" in
     monitor)
         shift
         if [ "$#" -eq 0 ]; then
-            monitor_menu
-            if [ "$MENU_HOME" -eq 1 ]; then main_menu; fi
+            info "旧监控已退出菜单。卸载旧服务：vt monitor uninstall；当前监控：vt komari。"
         else
             bash "$ROOT_DIR/scripts/monitor.sh" "$@"
         fi

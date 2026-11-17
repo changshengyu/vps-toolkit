@@ -1,12 +1,12 @@
 # Komari 监控
 
-入口：**主菜单 9 → Komari 监控**，或直接运行 `vt komari`。现有主菜单 1～8 的编号不变，Prometheus/Grafana 功能保留。本模块是独立安装，不自动迁移、停止或卸载旧监控，也不修改 3x-ui、代理配置或防火墙。
+入口：**主菜单 7 → Komari 监控**，或直接运行 `vt komari`。本模块是独立安装，不自动迁移、停止或卸载旧监控，也不修改 3x-ui、代理配置或防火墙。
 
 ## 部署顺序
 
 ### 1. 在监控机安装服务端
 
-选择 **9 → 1 安装 / 恢复服务端并初始化管理员**，或：
+选择 **7 → 1 安装 / 恢复服务端并初始化管理员**，或：
 
 ```bash
 vt komari setup-install
@@ -20,7 +20,7 @@ vt komari setup-install
 
 ### 2. 配置 HTTPS 域名
 
-在监控机选择 **9 → 1** 即可连续完成管理员初始化及 HTTPS 接入。输入尚无 DNS 记录的一级子域名和 Cloudflare API Token（账户 Tunnel 编辑、指定 Zone 的 DNS 编辑及 Zone 读取）。脚本创建独立 Tunnel、指向本机实际端口的路由和代理 CNAME。域名所在 Zone 需启用 Universal SSL，浏览器证书由 Cloudflare 签发并续期，VPS 不需要证书文件。API Token 不持久保存，已配置的域名会复用。旧版手动连接器也会保留；手动安装仍可用 `vt komari tunnel-install`。
+在监控机选择 **7 → 1** 即可连续完成管理员初始化及 HTTPS 接入。输入尚无 DNS 记录的一级子域名和 Cloudflare API Token（账户 Tunnel 编辑、指定 Zone 的 DNS 编辑及 Zone 读取）。脚本创建独立 Tunnel、指向本机实际端口的路由和代理 CNAME。域名所在 Zone 需启用 Universal SSL，浏览器证书由 Cloudflare 签发并续期，VPS 不需要证书文件。API Token 不持久保存，已配置的域名会复用。旧版手动连接器也会保留；手动安装仍可用 `vt komari tunnel-install`。
 
 连接器使用独立非登录账号 `vps-komari-tunnel` 和原生 systemd，固定 cloudflared **2026.11.0**。Token 存在独立私有目录，文件权限 0600，不出现在 unit 参数或命令行中；不监听公网端口。内部就绪接口为 `127.0.0.1:20246`，内存上限 96 MiB。默认使用 IPv4 连接 Cloudflare，避免不可用 IPv6 导致连接延迟。
 
@@ -32,9 +32,9 @@ vt komari setup-install
 
 先在 Komari 网页后台添加服务器，复制该服务器的 Agent Token；也可使用后台自动发现密钥。
 
-新节点使用固定版本的官方安装脚本和默认 komari-agent.service。已自行运行官方一键脚本的机器直接查看 **9 → 4**；菜单不会重装或覆盖该安装。工具箱旧节点继续使用原服务与身份，不会自动迁移或重复注册。两套并存时分别展示状态。官方服务使用 systemctl 管理（例如 systemctl restart komari-agent.service）；菜单 5 的 Agent 管理用于旧版服务。
+新节点使用固定版本的官方安装脚本和默认 komari-agent.service。已自行运行官方一键脚本的机器直接查看 **7 → 4**；菜单不会重装或覆盖该安装。工具箱旧节点继续使用原服务与身份，不会自动迁移或重复注册。两套并存时分别展示状态。官方服务使用 systemctl 管理（例如 systemctl restart komari-agent.service）；菜单 5 的 Agent 管理用于旧版服务。
 
-在**每台被监控 VPS**运行工具箱，选择 **9 → 2**，或：
+在**每台被监控 VPS**运行工具箱，选择 **7 → 2**，或：
 
 ```bash
 vt komari agent-install
@@ -64,7 +64,7 @@ vt komari restart tunnel
 vt komari uninstall agent
 ```
 
-菜单 **9 → 5** 可选择服务端、Agent 或连接器，再启动、停止、重启、看脱敏日志或卸载。启动会开启开机自启，停止会取消自启；异常退出后 systemd 自动重启。卸载只停止并移除本模块对应 unit，保留配置、数据库和二进制；再次执行对应安装命令可恢复。卸载 Agent 不会删除 Komari 后台的服务器记录，需要在网页后台删除。停止服务端会中断所有 Agent 上报。
+菜单 **7 → 5** 可选择服务端、Agent 或连接器，再启动、停止、重启、看脱敏日志或卸载。启动会开启开机自启，停止会取消自启；异常退出后 systemd 自动重启。卸载只停止并移除本模块对应 unit，保留配置、数据库和二进制；再次执行对应安装命令可恢复。卸载 Agent 不会删除 Komari 后台的服务器记录，需要在网页后台删除。停止服务端会中断所有 Agent 上报。
 
 无需域名时可用 SSH 访问页面；在 Mac 运行（替换实际 SSH 端口和监控机 IP）：
 
