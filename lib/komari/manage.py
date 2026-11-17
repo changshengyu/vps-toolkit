@@ -530,6 +530,52 @@ class Komari:
         self.initialize()
         self.access()
 
+    def setup_install(self):
+        self.server_install()
+        if not self.active('server') or not self.initialized():
+            print('完成本机管理员初始化后，再选本项开通 HTTPS。')
+            return
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'monitor'))
+        import cloudflare as cf
+        directory = self.paths.config / 'cloudflare'
+        directory.mkdir(mode=0o700, exist_ok=True)
+        try:
+            state = cf.load_state(directory, 'komari') if (directory / 'state.json').exists() else {}
+            if not state and self.paths.state('tunnel').exists():
+                print('已保留原有连接器和域名：' + self.state('tunnel')['endpoint'])
+                return
+            if not self.active('tunnel'):
+                self.free_port(20246)
+                self.headroom(96)
+            if not state.get('configured'):
+                domain = state.get('domain') or cf.domain_name(input('新的 Komari 一级子域名（例如 komari.example.com）: ').strip())
+                print('使用 Cloudflare Universal SSL 自动签发及续期。请确认该 Zone 已启用 Universal SSL。')
+                print('API Token 限定所属账户和域名：Account / Cloudflare Tunnel / Edit；Zone / DNS / Edit；Zone / Zone / Read。')
+                if not confirm('为 ' + domain + ' 创建独立 Tunnel 和 DNS 记录？'):
+                    return
+                with tempfile.TemporaryDirectory() as tmp:
+                    key = Path(tmp) / 'api-token'
+                    atomic(key, getpass.getpass('Cloudflare API Token（隐藏输入，仅本次使用）: ').strip())
+                    api = cf.API(key)
+                if state:
+                    cf.remove_remote(api, directory, 'komari')
+                cf.provision(api, directory, domain, 'komari', port_number(self.state('server')['port']))
+                state = cf.load_state(directory, 'komari')
+            url = 'https://' + state['domain']
+            token = (directory / 'connector-token').read_text().strip()
+            tunnel_credential(token)
+            self.connect_tunnel(url, token)
+            probe = command(['curl', '-q', '--noproxy', '*', '--proto', '=https', '--silent',
+                             '--fail', '--max-time', '10', url + '/api/version'], check=False)
+            try:
+                verified = probe.returncode == 0 and bool(json.loads(probe.stdout))
+            except ValueError:
+                verified = False
+            print('公网 HTTPS 已验证。' if verified else
+                  '连接器已启动，公网 HTTPS 尚未验证。请等待 DNS 生效，并在 Cloudflare → SSL/TLS → 边缘证书确认 Universal SSL 已激活。')
+        except cf.Error as exc:
+            raise Error(str(exc)) from None
+
     def tunnel_install(self):
         cfg = self.state('server')
         if not self.active('server'):
@@ -553,6 +599,9 @@ class Komari:
             self.headroom(96)
         if not confirm('保存 Token 并启动本工具的独立 Cloudflare 连接器？'):
             return
+        self.connect_tunnel(url, token)
+
+    def connect_tunnel(self, url, token):
         self.install_service('tunnel', {'endpoint': url}, {'token': token})
         print('连接器服务已启动，正在等待 Cloudflare 连接（最多 30 秒）…', flush=True)
         deadline = time.monotonic() + 30
@@ -567,7 +616,7 @@ class Komari:
                 pass
             time.sleep(1)
         print('入口地址：' + url + '/')
-        print('Cloudflare DNS 和 HTTP 路由由你刚才在控制台的配置决定，请在浏览器验证登录和节点上报。')
+        print('请在浏览器验证 HTTPS 登录及节点上报。')
         if not ready:
             raise Error('连接器已配置，但未确认连上 Cloudflare；配置保留供自动重连，请查看 tunnel 日志。')
         print('连接器已连上 Cloudflare。')
@@ -683,7 +732,7 @@ class Komari:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['server-install', 'agent-install', 'tunnel-install', 'access', 'status', 'logs', 'start', 'stop', 'restart', 'uninstall'])
+    parser.add_argument('action', choices=['setup-install', 'server-install', 'agent-install', 'tunnel-install', 'access', 'status', 'logs', 'start', 'stop', 'restart', 'uninstall'])
     parser.add_argument('role', nargs='?', choices=list(VERSIONS), default='server')
     args = parser.parse_args()
     manager = Komari()

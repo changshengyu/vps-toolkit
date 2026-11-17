@@ -133,11 +133,11 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.assertEqual(self.records()[0]['args'], ['check'])
 
     def test_komari_menu_and_cli_keep_existing_main_numbers(self):
-        routes = {(1,): ['server-install'], (2,): ['tunnel-install'], (3,): ['agent-install'],
-                  (4,): ['access'], (5,): ['status']}
+        routes = {(1,): ['setup-install'], (2,): ['agent-install'],
+                  (3,): ['access'], (4,): ['status']}
         for role_index, role in ((1, 'server'), (2, 'agent'), (3, 'tunnel')):
             for action_index, action in enumerate(('start', 'stop', 'restart', 'logs', 'uninstall'), 1):
-                routes[(6, role_index, action_index)] = [action, role]
+                routes[(5, role_index, action_index)] = [action, role]
         for path, args in routes.items():
             with self.subTest(path=path):
                 self.calls.unlink(missing_ok=True)
@@ -149,7 +149,7 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.run_menu('', 'komari', 'status')
         self.assertEqual(self.records()[0]['args'], ['status'])
         self.calls.unlink()
-        self.run_menu('6\n2\nm\nq\n', 'komari')
+        self.run_menu('5\n2\nm\nq\n', 'komari')
         self.assertEqual(self.records(), [])
 
     def test_home_unwinds_nested_menus_without_running_commands(self):
