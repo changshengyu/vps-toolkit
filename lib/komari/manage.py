@@ -384,6 +384,8 @@ class Komari:
         work.mkdir(mode=0o700, exist_ok=True)
         os.chown(work, uid, gid)
         os.chmod(work, 0o700)
+        if role == 'agent' and files and json.loads(files['agent.json']).get('auto_discovery_key'):
+            self.prepare_discovery_cache()
         p.units.mkdir(parents=True, exist_ok=True)
         unit_text = service_unit(p, role, config)
         self.verify_unit(role, unit_text)
@@ -620,6 +622,32 @@ class Komari:
         if not ready:
             raise Error('连接器已配置，但未确认连上 Cloudflare；配置保留供自动重连，请查看 tunnel 日志。')
         print('连接器已连上 Cloudflare。')
+
+    def prepare_discovery_cache(self):
+        # Agent 1.5.11 opens this exact path beside its executable, including
+        # on first registration. Only the private work directory is writable
+        # inside its systemd mount namespace.
+        source = self.paths.bin / 'auto-discovery.json'
+        target = self.paths.work('agent') / source.name
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            raise Error('自动发现身份路径异常，未重新注册。')
+        if source.is_symlink():
+            if os.readlink(source) != str(target):
+                raise Error('程序目录存在未知的自动发现身份链接，未覆盖。')
+            return
+        if source.exists():
+            if not source.is_file():
+                raise Error('自动发现身份不是普通文件，未覆盖。')
+            data = source.read_bytes()
+            if target.exists() and target.read_bytes() != data:
+                raise Error('存在两份不同的自动发现身份，未覆盖。')
+            atomic(target, data)
+        # Never create an empty JSON identity. Upstream registers only if
+        # there is no usable identity; its first write follows this link.
+        with tempfile.TemporaryDirectory(dir=self.paths.bin) as tmp:
+            link = Path(tmp) / source.name
+            link.symlink_to(target)
+            os.replace(link, source)
 
     def agent_install(self):
         p = self.paths

@@ -201,6 +201,13 @@ class KomariTests(unittest.TestCase):
             self.app.agent_install()
         cfg = json.loads((self.p.work('agent') / 'agent.json').read_text())
         self.assertFalse(cfg['disable_web_ssh'])
+        cache = self.p.bin / 'auto-discovery.json'
+        self.assertTrue(cache.is_symlink())
+        self.assertFalse(cache.exists())
+        cache.write_text('{"uuid":"fixture","token":"fixture"}')
+        self.app.prepare_discovery_cache()
+        self.assertEqual(cache.read_bytes(), (self.p.work('agent') / cache.name).read_bytes())
+        self.assertEqual(json.loads(cache.read_text())['uuid'], 'fixture')
         self.assertEqual(cfg['auto_discovery_key'], 'discovery-secret-123')
         self.assertNotIn('token', cfg)
 
