@@ -634,8 +634,9 @@ class Komari:
             self.headroom(64)
         print('在本台被监控 VPS 安装 Agent；监控机也需要安装一个 Agent 才会显示自身。')
         print('先在 Komari 后台添加服务器并复制 Agent Token，或使用后台的自动发现密钥。')
-        raw = input('Komari HTTPS 域名' + (' [' + old['endpoint'] + ']' if old else '') + ': ').strip()
-        url = endpoint(raw or old.get('endpoint', ''))
+        raw = input('Komari 面板域名（例如 komari.example.com）' + (' [' + urllib.parse.urlsplit(old['endpoint']).hostname + ']' if old else '') + ': ').strip()
+        value = raw or old.get('endpoint', '')
+        url = endpoint(value if '://' in value else 'https://' + value)
         default_mode = '2' if old.get('auto_discovery_key') else '1'
         mode = input('认证方式：1 节点 Token，2 自动发现密钥 [' + default_mode + ']: ').strip() or default_mode
         if mode not in ('1', '2'):
@@ -646,10 +647,15 @@ class Komari:
         interval = input('上报间隔秒数 [' + str(old.get('interval', 5)) + ']: ').strip() or str(old.get('interval', 5))
         if not re.fullmatch(r'[0-9]{1,3}', interval) or not 1 <= int(interval) <= 300:
             raise Error('上报间隔必须为 1～300 秒。')
-        print('HTTPS 证书验证开启；远程终端 / 命令控制关闭；自动更新关闭，保持固定版本。')
+        default_terminal = '1' if old.get('disable_web_ssh', True) else '2'
+        print('网页终端通过 Agent 建立会话，不使用 sshd。开启后，面板也可用 Agent 的 root 身份执行命令（受 systemd 限制）。')
+        terminal = input('面板远程访问：1 关闭，2 开启网页终端和命令执行 [' + default_terminal + ']: ').strip() or default_terminal
+        if terminal not in ('1', '2'):
+            raise Error('请选择 1 或 2。')
+        print('网页终端和命令执行：' + ('开启' if terminal == '2' else '关闭') + '；HTTPS 证书验证开启。')
         if not confirm('安装 / 更新本机 Agent 配置并开机自启？'):
             return
-        config = {'endpoint': url, field: token, 'interval': int(interval), 'disable_web_ssh': True,
+        config = {'endpoint': url, field: token, 'interval': int(interval), 'disable_web_ssh': terminal == '1',
                   'disable_auto_update': True, 'ignore_unsafe_cert': False, 'max_retries': 3,
                   'reconnect_interval': 5, 'info_report_interval': 5, 'prefer_ip_version': '4'}
         self.install_service('agent', {'endpoint': url}, {'agent.json': json.dumps(config) + '\n'})

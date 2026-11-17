@@ -172,11 +172,12 @@ class KomariTests(unittest.TestCase):
     def test_agent_config_is_private_and_disables_remote_control_and_updates(self):
         self.app.owned(create=True)
         secret = 'agent-fixture-token-1234'
-        with patch('builtins.input', side_effect=['https://komari.example.com', '', '', 'y']), \
+        with patch('builtins.input', side_effect=['komari.example.com', '', '', '', 'y']), \
                 patch.object(m.getpass, 'getpass', return_value=secret), patch('sys.stdout', new_callable=io.StringIO) as output:
             self.app.agent_install()
         cfg_path = self.p.work('agent') / 'agent.json'
         cfg = json.loads(cfg_path.read_text())
+        self.assertEqual(cfg['endpoint'], 'https://komari.example.com')
         self.assertTrue(cfg['disable_web_ssh'])
         self.assertTrue(cfg['disable_auto_update'])
         self.assertFalse(cfg['ignore_unsafe_cert'])
@@ -187,18 +188,19 @@ class KomariTests(unittest.TestCase):
         self.assertNotIn(secret, self.p.state('agent').read_text())
         self.assertNotIn(secret, output.getvalue())
         self.assertIn('--config', self.p.unit('agent').read_text())
-        with patch('builtins.input', side_effect=['', '', '', 'y']), patch.object(m.getpass, 'getpass', return_value=''), patch('sys.stdout', new_callable=io.StringIO):
+        with patch('builtins.input', side_effect=['', '', '', '', 'y']), patch.object(m.getpass, 'getpass', return_value=''), patch('sys.stdout', new_callable=io.StringIO):
             self.app.agent_install()
         self.assertEqual(json.loads(cfg_path.read_text())['token'], secret)
 
     def test_auto_discovery_mode_is_retained_on_reconfigure(self):
         self.app.owned(create=True)
-        with patch('builtins.input', side_effect=['https://komari.example.com', '2', '10', 'y']), \
+        with patch('builtins.input', side_effect=['https://komari.example.com', '2', '10', '2', 'y']), \
                 patch.object(m.getpass, 'getpass', return_value='discovery-secret-123'), patch('sys.stdout', new_callable=io.StringIO):
             self.app.agent_install()
-        with patch('builtins.input', side_effect=['', '', '', 'y']), patch.object(m.getpass, 'getpass', return_value=''), patch('sys.stdout', new_callable=io.StringIO):
+        with patch('builtins.input', side_effect=['', '', '', '', 'y']), patch.object(m.getpass, 'getpass', return_value=''), patch('sys.stdout', new_callable=io.StringIO):
             self.app.agent_install()
         cfg = json.loads((self.p.work('agent') / 'agent.json').read_text())
+        self.assertFalse(cfg['disable_web_ssh'])
         self.assertEqual(cfg['auto_discovery_key'], 'discovery-secret-123')
         self.assertNotIn('token', cfg)
 
