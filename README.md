@@ -75,26 +75,16 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 ├─ 4. 系统设置（IPv6）>    查看状态 / 开启 / 关闭
 ├─ 5. VPS 多功能工具箱
 ├─ 6. 使用帮助 / 快捷命令 >  安装 vt / 命令帮助 / 常见操作路径
-├─ 7. 监控管理 >
-│  ├─ 1. 安装监控机
-│  ├─ 2. 添加 / 部署被监控节点（自动流程）
-│  ├─ 3. 节点管理 >          列表 / 修改 / 暂停 / 删除
-│  ├─ 4. Grafana 面板 >      地址 / 账号密码 / 健康检查 / 资源调整
-│  ├─ 5. Cloudflare 域名入口 >  配置 / 状态 / 日志 / 恢复 / 暂停 / 移除
-│  ├─ 6. 状态与日志 >
-│  ├─ 7. 证书与手动接入 >      生成证书包 → 远端安装 → 监控机验证
-│  ├─ 8. 启动 / 停止 / 重启 / 卸载 >
-│  └─ 9. 备份与恢复（Telegram）>
+├─ 7. Komari 监控 >
 ├─ 8. ISP HTTPS 静态站点（Reality SNI）>
-├─ 9. Komari 监控 >        服务端初始化 / HTTPS 域名 / Agent 接入 / 服务管理
 └─ 0. 退出
 ```
 
-所有菜单统一支持：**0 返回上级、m 回主菜单、q 退出**（主菜单 0 退出）。操作结束的提示也可输入 m / q；`vt monitor` 直达监控菜单后同样可用 m 回主菜单。普通自动添加只需 **7 → 2**。
+所有菜单统一支持：**0 返回上级、m 回主菜单、q 退出**（主菜单 0 退出）。操作结束的提示也可输入 m / q。Komari 监控机选 **7 → 1**，被监控机选 **7 → 2**。
 
-首次监控：**7 → 1 安装 → 2 添加节点 → 4 查看面板**；需要 HTTPS 域名时进入 **7 → 5 → 1**。Grafana 的账号和资源管理位于 **7 → 4**，与 Cloudflare 连接器管理分开。已有节点域名可直接使用，支持中文、空格、`.`、`/` 显示名称；自动受限续期和新采集验证无需手工传包或重启监控服务。
+旧监控退役：在监控机和各旧节点分别执行 `vt monitor uninstall`。如需删除旧 Grafana 的专属 Tunnel 和 CNAME，先在监控机运行 `vt monitor tunnel-remove`。卸载保留数据和配置，不影响 Komari。
 
-选择 **6 → 1** 安装快捷命令，以后直接输入 `vt` 打开菜单，也可运行 `vt monitor`、`vt help`、`vt deploy --config-only`。在线入口每次重新打开会下载 main；已打开的旧菜单不会自动切换代码，合并更新后请退出重开。原有 CLI 命令不变。
+选择 **6 → 1** 安装快捷命令，以后直接输入 `vt` 打开菜单，也可运行 `vt komari`、`vt help`、`vt deploy --config-only`。在线入口每次重新打开会下载 main；已打开的旧菜单不会自动切换代码，合并更新后请退出重开。原有 CLI 命令不变。
 
 也可以克隆仓库后运行：
 
@@ -123,17 +113,6 @@ bash vps.sh result              # 查看上次部署结果
 bash vps.sh shortcut            # 安装快捷命令 vt
 bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
 bash vps.sh komari              # 打开独立 Komari 监控菜单
-bash vps.sh monitor             # 打开监控管理菜单
-bash vps.sh monitor hub-install # 仅在一台监控机安装 Prometheus + Grafana
-bash vps.sh monitor deploy-node # 填节点域名和 SSH 信息，自动安装并接入
-bash vps.sh monitor tunnel-setup # 第 3 步：自动配置 Grafana HTTPS 域名入口
-bash vps.sh monitor access      # 查看域名地址或备用 SSH 访问方法
-bash vps.sh monitor grafana-account # 修改 Grafana 实际登录账号 / 密码
-bash vps.sh monitor grafana-check # 检查本机面板就绪、重启及资源
-bash vps.sh monitor grafana-resources # 持久调整资源，迁移旧 192 MiB 配置
-bash vps.sh monitor renew-node  # 一键续签并同步，无需手工传证书包
-bash vps.sh monitor cert-status # 查看证书有效期
-bash vps.sh monitor help        # 查看全部监控操作
 bash vps.sh tools               # 打开工具箱
 ```
 

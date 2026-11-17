@@ -328,7 +328,8 @@ uninstall() {
         done
         info "容器已移除，Docker 数据卷和 $MONITOR_DIR 均保留，start 可恢复。"
         if [ -f "$CF_DIR/state.json" ]; then info "Cloudflare 入口记录保留；彻底删除请另运行 vt monitor tunnel-remove。"; fi
-    elif node_installed; then
+    fi
+    if node_installed && [ -f "$SYSTEMD_DIR/$NODE_SERVICE.service" ]; then
         systemctl disable --now "$NODE_SERVICE"
         revoke_renewal_key
         if [ -f "$NODE_CONFIG_DIR/.vps-toolkit-managed" ]; then
@@ -340,8 +341,8 @@ uninstall() {
         # Keep the binary/ownership marker for reinstallation and to avoid removing user accounts.
         info "采集器和本模块 IP 限制服务已移除，证书及二进制保留；旧 SSH 授权需自行撤销。"
         info "运行 node-install 可重新创建并启用服务。"
-    else
-        info "本机未安装监控服务。"
+    elif ! hub_installed; then
+        info "本机没有待卸载的旧监控服务。"
     fi
 }
 

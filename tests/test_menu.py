@@ -71,33 +71,12 @@ exit "${MENU_ACTION_EXIT:-0}"
         result = self.run_menu("q\n")
         self.assertIn(ONLINE, result.stdout)
         self.assertIn("主机：", result.stdout)
-        self.assertIn("监控角色：监控机", result.stdout)
+        self.assertNotIn("监控角色：监控机", result.stdout)
         self.assertIn("未安装（6 → 1）", result.stdout)
-        self.assertIn("https://monitor.example.com/", result.stdout)
+        self.assertNotIn("https://monitor.example.com/", result.stdout)
         self.assertNotIn("must-not-be-rendered", result.stdout + result.stderr)
         self.assertFalse((self.monitor / "should-not-exist").exists())
         self.assertEqual(self.records(), [])
-
-    def test_all_monitor_routes_dispatch_the_expected_operation(self):
-        routes = {
-            (1,): ["hub-install"], (2,): ["deploy-node"],
-            (4, 1): ["access"], (4, 2): ["grafana-account"], (4, 3): ["grafana-check"], (4, 4): ["grafana-resources"],
-            (5, 1): ["tunnel-setup"], (5, 2): ["tunnel-status"], (5, 3): ["tunnel-logs"],
-            (5, 4): ["tunnel-start"], (5, 5): ["tunnel-stop"], (5, 6): ["tunnel-remove"],
-            (6, 1): ["status"], (6, 2): ["logs"],
-            (7, 1): ["cert-status"], (7, 2): ["renew-node"], (7, 3): ["cert-renew", "client"],
-            (3, 1): ["nodes-list"], (3, 2): ["deploy-node"], (3, 3): ["nodes-manage"],
-            (7, 4, 1): ["prepare-node"], (7, 4, 2): ["node-install"], (7, 4, 3): ["add-node"],
-            (8, 1): ["start"], (8, 2): ["stop"], (8, 3): ["restart"], (8, 4): ["uninstall"],
-            (9, 1): ["backup-setup"], (9, 2): ["backup-run"], (9, 3): ["backup-status"], (9, 4): ["backup-logs"],
-            (9, 5): ["backup-restore"], (9, 6): ["backup-pause"], (9, 7): ["backup-resume"],
-        }
-        for path, expected in routes.items():
-            with self.subTest(path=path):
-                self.calls.unlink(missing_ok=True)
-                result = self.run_menu("7\n" + "\n".join(map(str, path)) + "\n\nq\n")
-                self.assertEqual([(r["script"], r["args"]) for r in self.records()], [("monitor.sh", expected)])
-                self.assertIn("当前位置：主菜单 / 监控管理", result.stdout)
 
     def test_existing_proxy_and_network_actions_keep_correct_arguments(self):
         routes = [
@@ -127,7 +106,7 @@ exit "${MENU_ACTION_EXIT:-0}"
             self.calls.unlink(missing_ok=True)
             result = self.run_menu('8\n' + '\n'.join(map(str, path)) + '\n\nq\n')
             self.assertEqual([(r['script'], r['args']) for r in self.records()], [('sni-site.sh', [action])])
-            self.assertIn('7. 监控管理', result.stdout)
+            self.assertIn('7. Komari', result.stdout)
         self.calls.unlink()
         self.run_menu('', 'sni-site', 'check')
         self.assertEqual(self.records()[0]['args'], ['check'])
@@ -141,9 +120,9 @@ exit "${MENU_ACTION_EXIT:-0}"
         for path, args in routes.items():
             with self.subTest(path=path):
                 self.calls.unlink(missing_ok=True)
-                out = self.run_menu('9\n' + '\n'.join(map(str, path)) + '\n\nq\n')
+                out = self.run_menu('7\n' + '\n'.join(map(str, path)) + '\n\nq\n')
                 self.assertEqual([(v['script'], v['args']) for v in self.records()], [('komari.sh', args)])
-                self.assertIn('7. 监控管理', out.stdout)
+                self.assertIn('7. Komari', out.stdout)
                 self.assertIn('8. ISP HTTPS', out.stdout)
         self.calls.unlink()
         self.run_menu('', 'komari', 'status')
@@ -160,20 +139,12 @@ exit "${MENU_ACTION_EXIT:-0}"
         result = self.run_menu("m\nq\n")
         self.assertEqual(result.stdout.count("  主菜单\n"), 2)
 
-    def test_back_returns_one_level_and_direct_monitor_can_go_home(self):
-        result = self.run_menu("7\n4\n0\n0\nq\n")
-        self.assertEqual(result.stdout.count("  监控管理（Prometheus + Grafana）\n"), 2)
-        result = self.run_menu("4\nm\nq\n", "monitor")
-        self.assertIn("当前位置：主菜单 / 监控管理 / Grafana 面板", result.stdout)
-        self.assertEqual(result.stdout.count("  主菜单\n"), 1)
-        self.assertEqual(self.records(), [])
-
     def test_failed_actions_stay_on_their_page_and_pause_supports_home(self):
-        result = self.run_menu("7\n4\n1\n\nq\n", extra={"MENU_ACTION_EXIT": "42"})
+        result = self.run_menu("7\n4\n\nq\n", extra={"MENU_ACTION_EXIT": "42"})
         self.assertIn("退出码 42", result.stderr)
-        self.assertEqual(result.stdout.count("当前位置：主菜单 / 监控管理 / Grafana 面板"), 2)
+        self.assertEqual(result.stdout.count("当前位置：主菜单 / Komari 监控"), 2)
         self.calls.unlink()
-        result = self.run_menu("7\n4\n1\nm\nq\n")
+        result = self.run_menu("7\n4\nm\nq\n")
         self.assertEqual(result.stdout.count("  主菜单\n"), 2)
         self.assertEqual(len(self.records()), 1)
 
@@ -191,7 +162,7 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.assertGreaterEqual(result.stdout.count("当前位置：主菜单 / 使用帮助与快捷命令"), 2)
 
     def test_eof_or_quit_never_starts_an_action_and_invalid_choice_can_recover(self):
-        for input_path in ("", "7\n", "7\n3\nq\n", "2\n4\nq\n", "999\n7\n3\n0\n0\nq\n"):
+        for input_path in ("", "7\n", "7\n5\nq\n", "2\n4\nq\n", "999\n7\n5\n0\n0\nq\n"):
             with self.subTest(input=input_path):
                 self.run_menu(input_path)
                 self.assertEqual(self.records(), [])
@@ -245,14 +216,6 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.assertNotIn(b'\x1b[', self.terminal(args=('help',)))
         redirected = self.run_menu('q\n', extra={'TERM': 'xterm-256color'})
         self.assertNotIn('\x1b[', redirected.stdout)
-
-    def test_node_manager_can_return_home_or_quit_without_extra_pause(self):
-        output = self.run_menu('7\n3\n3\nq\n', extra={'MENU_ACTION_EXIT': '90'})
-        self.assertEqual(output.stdout.count('  主菜单\n'), 2)
-        self.calls.unlink()
-        self.run_menu('7\n3\n3\n', extra={'MENU_ACTION_EXIT': '91'})
-        self.assertEqual(self.records()[0]['args'], ['nodes-manage'])
-
 
 if __name__ == "__main__":
     unittest.main()
