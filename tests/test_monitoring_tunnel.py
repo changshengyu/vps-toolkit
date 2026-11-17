@@ -92,6 +92,18 @@ class TunnelTests(MonitoringFixture):
         self.assertEqual((self.directory / "connector-token").stat().st_mode & 0o777, 0o400)
         self.assertEqual((self.directory / "state.json").stat().st_mode & 0o777, 0o600)
 
+    def test_komari_tunnel_has_separate_ownership_and_custom_origin(self):
+        cf.provision(self.api, self.directory, 'komari.example.com', 'komari', 25775)
+        self.assertTrue(cf.load_state(self.directory, 'komari')['configured'])
+        config = next(data for method, _, data in self.api.calls if method == 'PUT')
+        self.assertEqual(config['config']['ingress'][0], {'hostname': 'komari.example.com', 'service': 'http://127.0.0.1:25775'})
+        self.assertTrue(self.api.records[0]['proxied'])
+        with self.assertRaises(cf.Error):
+            cf.remove_remote(self.api, self.directory)
+        self.assertTrue(self.api.tunnels)
+        cf.remove_remote(self.api, self.directory, 'komari')
+        self.assertFalse(self.api.tunnels)
+
     def test_existing_dns_is_never_overwritten(self):
         self.api.records = [{"id": RECORD, "type": "A", "content": "192.0.2.1"}]
         with self.assertRaisesRegex(cf.Error, "已有 DNS"):

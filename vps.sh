@@ -750,24 +750,22 @@ komari_services_menu() {
 komari_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / Komari 监控"
-        info "  监控机：1 安装并初始化 → 2 HTTPS 域名；每台 VPS：3 安装 Agent。"
+        info "  监控机：1 安装并配置 HTTPS；每台 VPS：2 安装 Agent。"
         info "  原生 systemd，重启自启；不卸载旧监控，不修改代理与防火墙。"
         menu_items "Komari 监控" \
-            "安装 / 恢复服务端并初始化管理员（监控机）" \
-            "配置 HTTPS 域名入口（独立 Cloudflare Tunnel）" \
+            "安装 / 恢复监控机（管理员 + 自动 HTTPS 域名）" \
             "安装 / 修改本机 Agent（每台被监控 VPS）" \
             "查看访问地址与接入指南" \
             "查看本机状态与资源占用" \
             "服务与日志（启动 / 停止 / 卸载）>"
         menu_navigation
-        read_choice 6
+        read_choice 5
         case "$CHOICE" in
-            1) run bash "$ROOT_DIR/scripts/komari.sh" server-install ;;
-            2) run bash "$ROOT_DIR/scripts/komari.sh" tunnel-install ;;
-            3) run bash "$ROOT_DIR/scripts/komari.sh" agent-install ;;
-            4) run bash "$ROOT_DIR/scripts/komari.sh" access ;;
-            5) run bash "$ROOT_DIR/scripts/komari.sh" status ;;
-            6) komari_services_menu; continue ;;
+            1) run bash "$ROOT_DIR/scripts/komari.sh" setup-install ;;
+            2) run bash "$ROOT_DIR/scripts/komari.sh" agent-install ;;
+            3) run bash "$ROOT_DIR/scripts/komari.sh" access ;;
+            4) run bash "$ROOT_DIR/scripts/komari.sh" status ;;
+            5) komari_services_menu; continue ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac

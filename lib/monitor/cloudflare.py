@@ -49,7 +49,7 @@ def api_progress(method, path):
     elif "/dns_records" in path:
         message = {"GET": "检查 DNS 记录", "POST": "创建面板 CNAME", "DELETE": "移除本工具的 CNAME"}[method]
     elif path.endswith("/configurations"):
-        message = "配置 Grafana 转发路由"
+        message = "配置面板转发路由"
     elif path.endswith("/token"):
         message = "获取 Tunnel 连接凭据"
     else:
@@ -110,14 +110,14 @@ def identifier(value, uuid=False):
     return value
 
 
-def load_state(directory):
+def load_state(directory, app="grafana"):
     state = json.loads((directory / "state.json").read_text())
-    if state.get("managed_by") != "vps-toolkit-grafana-v1":
+    if state.get("managed_by") != f"vps-toolkit-{app}-v1":
         raise Error("没有本工具管理的 Tunnel 记录。")
     domain_name(state["domain"])
     identifier(state["account"])
     identifier(state["zone"])
-    if not re.fullmatch(r"vps-toolkit-grafana-[a-f0-9]{24}", state["name"]):
+    if not re.fullmatch("vps-toolkit-" + app + r"-[a-f0-9]{24}", state["name"]):
         raise Error("Tunnel 名称记录无效。")
     for key in ("tunnel", "dns"):
         if state.get(key):
@@ -125,7 +125,7 @@ def load_state(directory):
     return state
 
 
-def provision(api, directory, domain):
+def provision(api, directory, domain, app="grafana", port=3000):
     domain = domain_name(domain)
     state_path = directory / "state.json"
     if state_path.exists():
@@ -149,9 +149,9 @@ def provision(api, directory, domain):
     query = "?" + urllib.parse.urlencode({"name": domain})
     if api.call("GET", records_path + query):
         raise Error("这个域名已有 DNS 记录，未覆盖。请换一个新的面板子域名。")
-    state = {"managed_by": "vps-toolkit-grafana-v1", "domain": domain,
+    state = {"managed_by": f"vps-toolkit-{app}-v1", "domain": domain,
              "account": account, "zone": zone_id,
-             "name": "vps-toolkit-grafana-" + secrets.token_hex(12),
+             "name": f"vps-toolkit-{app}-" + secrets.token_hex(12),
              "tunnel": None, "dns": None, "configured": False}
     atomic_json(state_path, state)
     base = f"/accounts/{account}/cfd_tunnel"
@@ -167,7 +167,7 @@ def provision(api, directory, domain):
         stream.write(token)
     os.chmod(token_path, 0o400)
     api.call("PUT", base + "/" + state["tunnel"] + "/configurations", {"config": {"ingress": [
-        {"hostname": domain, "service": "http://127.0.0.1:3000"},
+        {"hostname": domain, "service": f"http://127.0.0.1:{port}"},
         {"service": "http_status:404"},
     ]}})
     result = api.call("POST", records_path, {
@@ -179,8 +179,8 @@ def provision(api, directory, domain):
     atomic_json(state_path, state)
 
 
-def remove_remote(api, directory):
-    state = load_state(directory)
+def remove_remote(api, directory, app="grafana"):
+    state = load_state(directory, app)
     path = directory / "state.json"
     base = f'/accounts/{state["account"]}/cfd_tunnel'
     # Recover a response lost after POST, using our unguessable, journaled name.

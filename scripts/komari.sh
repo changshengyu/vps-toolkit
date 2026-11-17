@@ -7,6 +7,7 @@ case "${1:-help}" in
     help|-h|--help)
         cat <<'HELP'
 用法：vt komari [操作] [server|agent|tunnel]
+  setup-install            安装监控机并自动创建 Cloudflare HTTPS 域名入口
   server-install           在监控机安装 / 恢复服务端并初始化管理员
   tunnel-install           配置独立 Cloudflare Tunnel 域名入口
   agent-install            在每台被监控 VPS 安装 / 更新 Agent 配置
