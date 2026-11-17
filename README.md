@@ -86,6 +86,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 │  ├─ 8. 启动 / 停止 / 重启 / 卸载 >
 │  └─ 9. 备份与恢复（Telegram）>
 ├─ 8. ISP HTTPS 静态站点（Reality SNI）>
+├─ 9. Komari 监控 >        服务端初始化 / HTTPS 域名 / Agent 接入 / 服务管理
 └─ 0. 退出
 ```
 
@@ -121,6 +122,7 @@ bash vps.sh 3x-ui status        # 查看 3x-ui 状态
 bash vps.sh result              # 查看上次部署结果
 bash vps.sh shortcut            # 安装快捷命令 vt
 bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
+bash vps.sh komari              # 打开独立 Komari 监控菜单
 bash vps.sh monitor             # 打开监控管理菜单
 bash vps.sh monitor hub-install # 仅在一台监控机安装 Prometheus + Grafana
 bash vps.sh monitor deploy-node # 填节点域名和 SSH 信息，自动安装并接入
@@ -161,6 +163,7 @@ docs/                   文档和配置示例
 - [一键部署节点](docs/deploy.md)：部署流程、参数、路由规则说明
 - [Hysteria2 端口跳跃](docs/hy2-port-hopping.md)
 - [3x-ui 面板](docs/3x-ui.md)
+- [Komari 监控](docs/komari.md)：原生服务端、终端初始化管理员、独立 Cloudflare Tunnel、Agent 接入和服务管理；保留旧监控
 - [多 VPS 监控](docs/monitoring.md)：安装角色、1 GB 试运行参数、域名接入、SSH 自动部署、HTTPS mTLS、自动续签及旧版本迁移
 
 ## 注意事项

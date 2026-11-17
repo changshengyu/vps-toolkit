@@ -15,6 +15,8 @@ jobs:
         run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
       - name: Monitoring regression tests
         run: python3 -m unittest discover -s tests -v
+      - name: Komari official binaries and first-run initialization
+        run: python3 tests/komari_integration.py
       - name: Prometheus configuration
         run: >-
           docker run --rm --entrypoint /bin/promtool
