@@ -42,6 +42,8 @@ class KomariTests(unittest.TestCase):
             self.calls.append(args)
             code = 0
             if args[0] == 'systemctl':
+                if args[1:3] == ['show', m.OFFICIAL_UNIT]:
+                    return subprocess.CompletedProcess(args, 4, 'LoadState=not-found\n', '')
                 unit = args[-1]
                 if args[1] == 'is-active':
                     code = 0 if unit in self.running else 3
@@ -170,7 +172,7 @@ class KomariTests(unittest.TestCase):
         self.assertNotIn(password, self.p.state('server').read_text())
 
     def test_agent_config_is_private_and_disables_remote_control_and_updates(self):
-        self.app.owned(create=True)
+        self.install('agent', {'agent.json': '{"endpoint":"https://komari.example.com"}'})
         secret = 'agent-fixture-token-1234'
         with patch('builtins.input', side_effect=['komari.example.com', '', '', '', 'y']), \
                 patch.object(m.getpass, 'getpass', return_value=secret), patch('sys.stdout', new_callable=io.StringIO) as output:
@@ -192,8 +194,31 @@ class KomariTests(unittest.TestCase):
             self.app.agent_install()
         self.assertEqual(json.loads(cfg_path.read_text())['token'], secret)
 
-    def test_auto_discovery_mode_is_retained_on_reconfigure(self):
+    def test_external_official_service_is_detected_without_reinstall(self):
+        with patch.object(self.app, 'official_info', return_value={'LoadState':'loaded','ActiveState':'active'}), patch('builtins.input', side_effect=AssertionError):
+            self.app.agent_install()
+            self.app.status()
+        self.assertFalse(self.p.unit('agent').exists())
+        self.assertFalse(self.p.base.exists())
+
+    def test_fresh_agent_uses_official_installer_with_private_config(self):
         self.app.owned(create=True)
+        calls = []
+        import hashlib
+        def run(args, **kw):
+            calls.append(list(map(str,args)))
+            if args[0] == 'curl':
+                Path(args[args.index('-o') + 1]).write_bytes(b'fixture')
+        with patch.object(m, 'command', side_effect=run), patch.object(m, 'INSTALLER_SHA256', hashlib.sha256(b'fixture').hexdigest()), patch.object(self.app, 'official_info', return_value={'ActiveState':'active','UnitFileState':'enabled'}):
+            self.app.install_official({'token':'private-fixture'}, False)
+        self.assertNotIn('private-fixture', str(calls))
+        self.assertIn('--install-no-mirror', calls[-1])
+        path = self.p.config / 'official-agent.json'
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(json.loads(path.read_text())['token'], 'private-fixture')
+
+    def test_auto_discovery_mode_is_retained_on_reconfigure(self):
+        self.install('agent', {'agent.json': '{"endpoint":"https://komari.example.com"}'})
         with patch('builtins.input', side_effect=['https://komari.example.com', '2', '10', '2', 'y']), \
                 patch.object(m.getpass, 'getpass', return_value='discovery-secret-123'), patch('sys.stdout', new_callable=io.StringIO):
             self.app.agent_install()

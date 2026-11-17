@@ -40,6 +40,11 @@ USERS = {'server': 'vps-komari', 'agent': 'root', 'tunnel': 'vps-komari-tunnel'}
 MEMORY = {'server': (256, 128, 50), 'agent': (64, 48, 15), 'tunnel': (96, 64, 20)}
 
 
+OFFICIAL_UNIT = 'komari-agent.service'
+INSTALLER_COMMIT = 'c7bafb79b1a73ed9e14e2c248ae4d4163e506036'
+INSTALLER_SHA256 = '17294dbdbdde3d6a88d8e21323804c9f2814cc6f217c63ee8054db1788ecd446'
+
+
 class Error(Exception):
     pass
 
@@ -649,16 +654,81 @@ class Komari:
             link.symlink_to(target)
             os.replace(link, source)
 
+    @staticmethod
+    def agent_summary(info):
+        memory = info.get('MemoryCurrent', '')
+        return ('运行=' + info.get('ActiveState', '?') + '/' + info.get('SubState', '?')
+                + '；开机启动=' + info.get('UnitFileState', '?') + '；当前内存='
+                + (f'{int(memory) / 1048576:.1f} MiB' if memory.isdigit() and int(memory) < 2**63 else '未知'))
+
+    def official_info(self):
+        # systemctl show may return a nonzero status for a missing unit.
+        res = command(['systemctl', 'show', OFFICIAL_UNIT,
+                       '--property=LoadState,ActiveState,SubState,UnitFileState,MemoryCurrent'], check=False)
+        info = dict(line.split('=', 1) for line in res.stdout.splitlines() if '=' in line)
+        if info.get('LoadState') == 'not-found':
+            return {}
+        if res.returncode or not info.get('LoadState'):
+            raise Error('无法确认官方 Agent 服务状态；未尝试安装。')
+        return info
+
+    def install_official(self, config, existing):
+        p = self.paths
+        cfg = p.config / 'official-agent.json'
+        base = p.prefix / 'opt/komari'
+        if existing:
+            old = cfg.read_bytes()
+            save(cfg, config)
+            try:
+                command(['systemctl', 'restart', OFFICIAL_UNIT])
+            except Error:
+                atomic(cfg, old)
+                command(['systemctl', 'restart', OFFICIAL_UNIT], check=False)
+                raise
+        else:
+            if base.is_symlink() or (base.exists() and (base.stat().st_uid != os.geteuid() or any(base.iterdir()))):
+                raise Error('官方安装目录已有内容；为保留原节点身份，未覆盖。请先检查 /opt/komari。')
+            with tempfile.TemporaryDirectory() as tmp:
+                script = Path(tmp) / 'install.sh'
+                command(['curl', '-q', '-fsSL', '--proto', '=https', '--max-time', '60', '-o', script,
+                         'https://raw.githubusercontent.com/komari-monitor/komari-agent/' + INSTALLER_COMMIT + '/install.sh'], timeout=65)
+                if hashlib.sha256(script.read_bytes()).hexdigest() != INSTALLER_SHA256:
+                    raise Error('官方安装脚本校验失败。')
+                base.mkdir(mode=0o700, exist_ok=True)
+                os.chmod(base, 0o700)
+                save(cfg, config)
+                command(['env', 'SUDO_USER=root', 'sh', script, '--install-no-mirror',
+                         '--install-version', VERSIONS['agent'], '--config', cfg], timeout=300)
+        info = self.official_info()
+        if info.get('ActiveState') != 'active' or info.get('UnitFileState') != 'enabled':
+            raise Error('官方服务未确认已运行并开机自启；请用菜单 4 查看状态。')
+
     def agent_install(self):
         p = self.paths
+        official = self.official_info()
+        legacy = p.state('agent').exists()
+        if not legacy and p.unit('agent').exists():
+            raise Error('旧版服务仍存在但缺少管理记录，未安装第二个 Agent。')
+        if legacy and official:
+            raise Error('同时检测到官方与工具箱 Agent；请用菜单 4 核对状态，不会重装或停止任何一套。')
+        cfg = p.config / 'official-agent.json'
+        if official:
+            unit = p.units / OFFICIAL_UNIT
+            expected = 'ExecStart=/opt/komari/agent --config ' + str(cfg)
+            if not cfg.is_file() or not unit.is_file() or expected not in unit.read_text().splitlines():
+                print('已识别官方安装，无需重复安装；保留其配置及自动发现身份。')
+                print(OFFICIAL_UNIT + '：' + self.agent_summary(official))
+                return
         old = {}
-        if p.state('agent').exists():
+        if legacy:
             self.state('agent')
-            config_path = p.work('agent') / 'agent.json'
-            if config_path.is_symlink():
-                raise Error('Agent 配置不能为符号链接。')
-            old = json.loads(config_path.read_text())
-        if not self.active('agent'):
+            cfg = p.work('agent') / 'agent.json'
+            print('保留旧版服务、配置和节点身份；本次只更新原 Agent。')
+        if cfg.is_symlink():
+            raise Error('Agent 配置不能为符号链接。')
+        if cfg.is_file():
+            old = json.loads(cfg.read_text())
+        if not official and not self.active('agent'):
             self.headroom(64)
         print('在本台被监控 VPS 安装 Agent；监控机也需要安装一个 Agent 才会显示自身。')
         print('先在 Komari 后台添加服务器并复制 Agent Token，或使用后台的自动发现密钥。')
@@ -686,6 +756,10 @@ class Komari:
         config = {'endpoint': url, field: token, 'interval': int(interval), 'disable_web_ssh': terminal == '1',
                   'disable_auto_update': True, 'ignore_unsafe_cert': False, 'max_retries': 3,
                   'reconnect_interval': 5, 'info_report_interval': 5, 'prefer_ip_version': '4'}
+        if not legacy:
+            self.install_official(config, bool(official))
+            print('官方 Agent 已启动；请到面板确认节点在线。')
+            return
         self.install_service('agent', {'endpoint': url}, {'agent.json': json.dumps(config) + '\n'})
         print('Agent 服务已启动；接入是否成功请在 Komari 后台确认，不以进程运行代替在线验证。')
 
@@ -707,9 +781,13 @@ class Komari:
         print('旧 Prometheus/Grafana 的 Telegram 备份不包含本模块；请为 Komari 单独备份。')
 
     def status(self):
+        official = self.official_info()
+        print('官方 Agent（komari-agent.service）：' + (self.agent_summary(official) if official else '未安装'))
+        if official.get('ActiveState') == 'active' and self.active('agent'):
+            print('注意：官方和工具箱 Agent 同时运行，请核对面板上报来源。')
         for role in VERSIONS:
             if not self.paths.state(role).exists():
-                print(role + '：未配置')
+                print(('旧版工具箱 Agent' if role == 'agent' else role) + '：未配置')
                 continue
             cfg = self.state(role)
             result = command(['systemctl', 'show', self.paths.unit(role).name, '--property=ActiveState,SubState,MemoryCurrent,UnitFileState'], check=False)
@@ -771,7 +849,8 @@ def main():
     args = parser.parse_args()
     manager = Komari()
     if args.action in ('access', 'status', 'logs'):
-        manager.owned()
+        if args.action != 'status' or manager.paths.base.exists():
+            manager.owned()
         if args.action == 'logs':
             manager.logs(args.role)
         else:
