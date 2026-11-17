@@ -54,6 +54,7 @@ show_help() {
   result                     查看上次部署结果
   ipv6 status|enable|disable 查看 / 开启 / 关闭系统 IPv6
   monitor [操作]             管理 Prometheus / Grafana 监控（help 查看操作）
+  komari [操作]              部署 Komari 服务端 / Agent / 域名入口
   sni-site [操作]            ISP HTTPS 静态站点 / Reality SNI（help 查看操作）
   shortcut                   安装快捷命令 vt
   tools [上游参数]           运行 VPS 多功能工具箱
@@ -178,6 +179,10 @@ status_monitor_role() {
         printf '监控机'
     elif [ -f "/usr/local/lib/vps-toolkit-monitor/.vps-toolkit-managed" ]; then
         printf '被监控节点'
+    elif [ -f /opt/vps-toolkit-komari/config/server.json ]; then
+        printf 'Komari 监控机'
+    elif [ -f /opt/vps-toolkit-komari/config/agent.json ]; then
+        printf 'Komari Agent'
     else
         printf '未部署监控'
     fi
@@ -229,7 +234,7 @@ opening_commands() {
     printf '  在线打开（可复制）：\n'
     printf 'bash <(curl -fsSL %s)\n' "$REPO_RAW_SCRIPT"
     printf '  快捷命令：%s\n' "$(status_shortcut)"
-    printf '  常用命令（安装 vt 后）：vt monitor  |  vt help\n'
+    printf '  常用命令（安装 vt 后）：vt komari  |  vt monitor  |  vt help\n'
 }
 
 menu_header() {
@@ -701,6 +706,75 @@ sni_site_menu() {
     done
 }
 
+komari_role_menu() {
+    local role="$1" title="$2"
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / Komari 监控 / $title"
+        case "$role" in
+            server) info "  停止服务端会中断所有节点上报；卸载保留数据库和配置。" ;;
+            agent) info "  仅管理本台采集器；后台服务器记录在 Komari 网页中删除。" ;;
+            tunnel) info "  停止连接器会中断域名访问与 Agent 上报；页面仍可通过 SSH 访问。" ;;
+        esac
+        menu_items "$title" "启动（开机自启）" "停止（取消自启）" "重启" "查看日志（隐藏 Token）" "卸载服务（保留数据）"
+        menu_navigation
+        read_choice 5
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/komari.sh" start "$role" ;;
+            2) run bash "$ROOT_DIR/scripts/komari.sh" stop "$role" ;;
+            3) run bash "$ROOT_DIR/scripts/komari.sh" restart "$role" ;;
+            4) run bash "$ROOT_DIR/scripts/komari.sh" logs "$role" ;;
+            5) run bash "$ROOT_DIR/scripts/komari.sh" uninstall "$role" ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
+komari_services_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / Komari 监控 / 服务与日志"
+        menu_items "选择本机角色" "服务端 >" "Agent 采集器 >" "Cloudflare 连接器 >"
+        menu_navigation
+        read_choice 3
+        case "$CHOICE" in
+            1) komari_role_menu server 服务端 ;;
+            2) komari_role_menu agent Agent采集器 ;;
+            3) komari_role_menu tunnel Cloudflare连接器 ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE" ;;
+        esac
+    done
+}
+
+komari_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / Komari 监控"
+        info "  监控机：1 安装并初始化 → 2 HTTPS 域名；每台 VPS：3 安装 Agent。"
+        info "  原生 systemd，重启自启；不卸载旧监控，不修改代理与防火墙。"
+        menu_items "Komari 监控" \
+            "安装 / 恢复服务端并初始化管理员（监控机）" \
+            "配置 HTTPS 域名入口（独立 Cloudflare Tunnel）" \
+            "安装 / 修改本机 Agent（每台被监控 VPS）" \
+            "查看访问地址与接入指南" \
+            "查看本机状态与资源占用" \
+            "服务与日志（启动 / 停止 / 卸载）>"
+        menu_navigation
+        read_choice 6
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/komari.sh" server-install ;;
+            2) run bash "$ROOT_DIR/scripts/komari.sh" tunnel-install ;;
+            3) run bash "$ROOT_DIR/scripts/komari.sh" agent-install ;;
+            4) run bash "$ROOT_DIR/scripts/komari.sh" access ;;
+            5) run bash "$ROOT_DIR/scripts/komari.sh" status ;;
+            6) komari_services_menu; continue ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 main_menu() {
     while true; do
         MENU_HOME=0
@@ -713,9 +787,10 @@ main_menu() {
             "VPS 多功能工具箱" \
             "使用帮助 / 快捷命令 >" \
             "监控管理（Prometheus + Grafana）>" \
-            "ISP HTTPS 静态站点（Reality SNI）>"
+            "ISP HTTPS 静态站点（Reality SNI）>" \
+            "Komari 监控（服务端 / Agent / 域名）>"
         menu_navigation 退出
-        read_choice 8
+        read_choice 9
         case "$CHOICE" in
             1) deploy_menu ;;
             2) xui_menu ;;
@@ -725,6 +800,7 @@ main_menu() {
             6) help_menu ;;
             7) monitor_menu ;;
             8) sni_site_menu ;;
+            9) komari_menu ;;
             0) if [ "$MENU_HOME" -eq 1 ]; then continue; fi; exit 0 ;;
             *) warn "无效选项：$CHOICE" ;;
         esac
@@ -759,6 +835,15 @@ case "${1:-menu}" in
             if [ "$MENU_HOME" -eq 1 ]; then main_menu; fi
         else
             bash "$ROOT_DIR/scripts/sni-site.sh" "$@"
+        fi
+        ;;
+    komari)
+        shift
+        if [ "$#" -eq 0 ]; then
+            komari_menu
+            if [ "$MENU_HOME" -eq 1 ]; then main_menu; fi
+        else
+            bash "$ROOT_DIR/scripts/komari.sh" "$@"
         fi
         ;;
     shortcut) install_shortcut ;;

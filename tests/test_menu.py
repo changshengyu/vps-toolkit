@@ -35,7 +35,7 @@ CODE
 exit "${MENU_ACTION_EXIT:-0}"
 '''
         for name in ("deploy.sh", "monitor.sh", "3x-ui.sh", "xui-routing.sh", "xui-geodata.sh",
-                     "hy2-port-hopping.sh", "ipv6.sh", "vps-tools.sh", "sni-site.sh"):
+                     "hy2-port-hopping.sh", "ipv6.sh", "vps-tools.sh", "sni-site.sh", "komari.sh"):
             (self.repo / "scripts" / name).write_text(stub)
         denied = self.path / "bin"
         denied.mkdir()
@@ -131,6 +131,26 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.calls.unlink()
         self.run_menu('', 'sni-site', 'check')
         self.assertEqual(self.records()[0]['args'], ['check'])
+
+    def test_komari_menu_and_cli_keep_existing_main_numbers(self):
+        routes = {(1,): ['server-install'], (2,): ['tunnel-install'], (3,): ['agent-install'],
+                  (4,): ['access'], (5,): ['status']}
+        for role_index, role in ((1, 'server'), (2, 'agent'), (3, 'tunnel')):
+            for action_index, action in enumerate(('start', 'stop', 'restart', 'logs', 'uninstall'), 1):
+                routes[(6, role_index, action_index)] = [action, role]
+        for path, args in routes.items():
+            with self.subTest(path=path):
+                self.calls.unlink(missing_ok=True)
+                out = self.run_menu('9\n' + '\n'.join(map(str, path)) + '\n\nq\n')
+                self.assertEqual([(v['script'], v['args']) for v in self.records()], [('komari.sh', args)])
+                self.assertIn('7. 监控管理', out.stdout)
+                self.assertIn('8. ISP HTTPS', out.stdout)
+        self.calls.unlink()
+        self.run_menu('', 'komari', 'status')
+        self.assertEqual(self.records()[0]['args'], ['status'])
+        self.calls.unlink()
+        self.run_menu('6\n2\nm\nq\n', 'komari')
+        self.assertEqual(self.records(), [])
 
     def test_home_unwinds_nested_menus_without_running_commands(self):
         result = self.run_menu("2\n4\nm\nq\n")
