@@ -734,7 +734,7 @@ komari_role_menu() {
 komari_services_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / Komari 监控 / 服务与日志"
-        menu_items "选择本机角色" "服务端 >" "Agent 采集器 >" "Cloudflare 连接器 >"
+        menu_items "选择本机角色" "服务端 >" "旧版工具箱 Agent >" "Cloudflare 连接器 >"
         menu_navigation
         read_choice 3
         case "$CHOICE" in
@@ -754,9 +754,9 @@ komari_menu() {
         info "  原生 systemd，重启自启；不卸载旧监控，不修改代理与防火墙。"
         menu_items "Komari 监控" \
             "安装 / 恢复监控机（管理员 + 自动 HTTPS 域名）" \
-            "安装 / 修改本机 Agent（每台被监控 VPS）" \
+            "安装 / 识别官方 Agent（保留已有节点）" \
             "查看访问地址与接入指南" \
-            "查看本机状态与资源占用" \
+            "查看本机状态与资源占用（官方 / 工具箱）" \
             "服务与日志（启动 / 停止 / 卸载）>"
         menu_navigation
         read_choice 5
