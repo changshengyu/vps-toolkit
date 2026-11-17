@@ -15,6 +15,8 @@ jobs:
         run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -n1 bash -n
       - name: Monitoring regression tests
         run: python3 -m unittest discover -s tests -v
+      - name: Komari real systemd unit validation
+        run: python3 tests/komari_systemd_validation.py
       - name: Komari official binaries and first-run initialization
         run: python3 tests/komari_integration.py
       - name: Prometheus configuration
@@ -37,3 +39,12 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y nftables
           sudo bash tests/monitoring_firewall_integration.sh
+  komari-systemd-249:
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ubuntu 22.04 systemd 249 dependencies
+        run: apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd python3
+      - name: Validate server, Agent and Tunnel units with systemd 249
+        run: python3 tests/komari_systemd_validation.py
