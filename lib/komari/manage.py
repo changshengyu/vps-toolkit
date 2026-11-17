@@ -12,6 +12,7 @@ from pathlib import Path
 import platform
 import pwd
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -50,12 +51,29 @@ def command(args, timeout=30, check=True):
         raise Error('命令无法运行或超时：' + str(args[0])) from None
     if check and result.returncode:
         # Do not relay credential-bearing command output into diagnostics.
+        if str(args[0]) in ('systemctl', 'systemd-analyze'):
+            action = ' '.join(str(a) for a in args[:2])
+            detail = redact('\n'.join((result.stderr or result.stdout).splitlines()[-8:]))
+            raise Error(f'{action} 执行失败（退出码 {result.returncode}）' + ('：\n' + detail if detail else '；请查看本模块日志。'))
         raise Error(f'{args[0]} 执行失败（退出码 {result.returncode}）；请查看本模块日志。')
     return result
 
 
 def quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
+
+
+def working_directory(value):
+    # This scalar systemd directive does not remove shell-style surrounding quotes.
+    value = str(value)
+    if not value.startswith('/') or any(c in value for c in '\r\n\0'):
+        raise Error('systemd 工作目录必须为不含换行的绝对路径。')
+    return value.replace('%', '%%')
+
+
+def redact(value):
+    value = re.sub(r'(?i)(token|password|secret|authorization)(["\s:=]+)[^\s,;]+', r'\1\2[REDACTED]', value)
+    return re.sub(r'(https?://)[^\s/@:]+:[^\s/@]+@', r'\1[REDACTED]@', value)
 
 
 def atomic(path, value, mode=0o600):
@@ -208,7 +226,7 @@ Wants=network-online.target
 Type=simple
 User={USERS[role]}
 Group={USERS[role]}
-WorkingDirectory={quote(work)}
+WorkingDirectory={working_directory(work)}
 ExecStart={quote(paths.binary(role))} {args}
 Environment=GOMEMLIMIT={go}MiB
 Environment=GOMAXPROCS=1
@@ -367,6 +385,8 @@ class Komari:
         os.chown(work, uid, gid)
         os.chmod(work, 0o700)
         p.units.mkdir(parents=True, exist_ok=True)
+        unit_text = service_unit(p, role, config)
+        self.verify_unit(role, unit_text)
         changed = [p.unit(role), p.state(role)] + [work / name for name in (files or {})]
         previous = {}
         for path in changed:
@@ -380,7 +400,7 @@ class Komari:
                 atomic(work / name, value)
                 os.chown(work / name, uid, gid)
             save(p.state(role), {'managed_by': MARKER, 'role': role, 'version': VERSIONS[role], **config})
-            atomic(p.unit(role), service_unit(p, role, config), 0o644)
+            atomic(p.unit(role), unit_text, 0o644)
             command(['systemctl', 'daemon-reload'])
             command(['systemctl', 'enable', p.unit(role).name])
             command(['systemctl', 'restart', p.unit(role).name])
@@ -389,6 +409,7 @@ class Komari:
             elif not self.active(role):
                 raise Error('服务启动后未保持运行。')
         except Exception:
+            self.activation_diagnostics(role)
             command(['systemctl', 'stop', p.unit(role).name], check=False)
             for path, old in previous.items():
                 if old is None:
@@ -402,6 +423,26 @@ class Komari:
             if running:
                 command(['systemctl', 'start', p.unit(role).name], check=False)
             raise
+
+    def verify_unit(self, role, text):
+        if not shutil.which('systemd-analyze'):
+            print('提示：未安装 systemd-analyze，跳过本机 unit 预校验。')
+            return
+        with tempfile.TemporaryDirectory(prefix='vt-komari-unit-') as folder:
+            path = Path(folder) / self.paths.unit(role).name
+            atomic(path, text, 0o644)
+            command(['systemd-analyze', 'verify', '--man=no', path])
+
+    def activation_diagnostics(self, role):
+        # Collect before rollback removes a newly-created unit.
+        print('启动失败诊断（随后回退本次 unit 和管理配置）：', file=sys.stderr)
+        try:
+            result = command(['systemctl', 'show', self.paths.unit(role).name,
+                              '--property=LoadState,ActiveState,SubState,Result,ExecMainStatus'], check=False)
+            print(redact(result.stdout), file=sys.stderr)
+            self.logs(role, limit=20)
+        except (Error, OSError, ValueError, KeyError):
+            print('自动诊断未完成；可运行 journalctl -u ' + self.paths.unit(role).name + ' -b -n 60 --no-pager。', file=sys.stderr)
 
     def wait_server(self, port, initialized=False):
         deadline = time.monotonic() + 60
@@ -592,9 +633,9 @@ class Komari:
             print(f'{role}（{cfg["version"]}）：' + '; '.join(result.stdout.strip().splitlines()))
         self.access()
 
-    def logs(self, role):
+    def logs(self, role, limit=60):
         self.state(role)
-        result = command(['journalctl', '-u', self.paths.unit(role).name, '-n', '60', '--no-pager'], check=False)
+        result = command(['journalctl', '-u', self.paths.unit(role).name, '-n', str(limit), '--no-pager'], check=False)
         secrets = []
         path = self.paths.work('agent') / 'agent.json'
         if path.is_file() and not path.is_symlink():
@@ -607,8 +648,7 @@ class Komari:
         for secret in secrets:
             if secret:
                 output = output.replace(secret, '[REDACTED]')
-        output = re.sub(r'(?i)(token|password|secret|authorization)(["\s:=]+)[^\s,;]+', r'\1\2[REDACTED]', output)
-        print(output)
+        print(redact(output))
 
     def service(self, role, action):
         self.state(role)

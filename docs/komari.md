@@ -89,6 +89,8 @@ ssh -N -T -p SSH端口 -L 127.0.0.1:15774:127.0.0.1:25774 root@监控机IP
 
 systemd unit 名称分别为 `vps-toolkit-komari-server`、`vps-toolkit-komari-agent`、`vps-toolkit-komari-tunnel`。已有 `/opt/komari`、官方 `komari.service` 或其他非本模块目录不会被接管。
 
+安装会先使用本机 `systemd-analyze verify` 校验生成的 unit（系统未提供该命令时会提示跳过）。启动失败时先显示 systemd 状态和最近的脱敏日志，再回退本次 unit 与管理配置。修复原因后重新选择对应安装项即可重试，已有账号、数据库和已校验二进制会保留。若看到 `WorkingDirectory= path is not absolute` 且路径带双引号，请更新工具后重试安装；不需要开放公网端口。
+
 **现有工具箱的 Prometheus/Grafana 加密 Telegram 自动备份不包含 Komari，本模块尚未新增自动备份/恢复功能。** Komari 1.6.1 的内置备份白名单存在 `plugin-data` 拼写问题，安装插件后应单独确认备份覆盖范围和恢复结果。做完整文件备份时先停止本模块服务端，备份整个 `server/` 目录以保证数据库一致性；备份含敏感配置，应加密后保存到监控机之外，再启动服务。
 
 建议先接入 1～2 台节点，验证上线/离线、指标、Telegram 通知插件及资源告警，再考虑停用旧监控。Grafana 告警、联系点、Prometheus 历史和证书不能直接导入 Komari。旧工具箱也不会因新模块安装而自动删除它们。
@@ -96,5 +98,7 @@ systemd unit 名称分别为 `vps-toolkit-komari-server`、`vps-toolkit-komari-a
 ## 验证
 
 单元与菜单回归：`python3 -m unittest discover -s tests -v`。真实程序验证：`python3 tests/komari_integration.py`，下载并校验官方固定版本，测试首次初始化 API、页面访问、数据库重启保留和 Agent/连接器 CLI 参数，不连接真实节点或 Cloudflare。
+
+真实 unit 解析验证：`python3 tests/komari_systemd_validation.py`，覆盖三种角色、普通路径及含空格/百分号路径，并验证旧的引号写法被拒绝；CI 同时在 Ubuntu 22.04 的 systemd 249 和当前 runner 的 systemd 上运行。不启动服务、不连接真实节点。
 
 参考：[Komari](https://github.com/komari-monitor/komari)、[Agent](https://github.com/komari-monitor/komari-agent)、[官方首次安装接口](https://github.com/komari-monitor/komari/blob/1.6.1/web/install/install.go)。

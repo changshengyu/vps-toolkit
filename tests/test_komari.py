@@ -84,6 +84,51 @@ class KomariTests(unittest.TestCase):
     def fake_download(self, role):
         m.atomic(self.p.binary(role), '#!/bin/sh\nexit 0\n', 0o755)
 
+    def test_working_directory_is_an_absolute_scalar_for_all_roles(self):
+        paths = m.Paths(self.root / 'path with spaces % sign')
+        for role in ('server', 'agent', 'tunnel'):
+            text = m.service_unit(paths, role, {'port': 25774})
+            line = next(line for line in text.splitlines() if line.startswith('WorkingDirectory='))
+            self.assertEqual(line, 'WorkingDirectory=' + str(paths.work(role)).replace('%', '%%'))
+            self.assertNotIn('WorkingDirectory="', text)
+        for value in ('relative/path', '/absolute\nInjected=yes', '/absolute\rInjected=yes', '/bad\0path'):
+            with self.subTest(value=value), self.assertRaises(m.Error):
+                m.working_directory(value)
+
+    def test_unit_prevalidation_failure_does_not_stop_or_replace_existing_service(self):
+        self.install('agent', {'agent.json': '{"token":"existing-private-token"}'})
+        before = {p: p.read_bytes() for p in (self.p.unit('agent'), self.p.state('agent'), self.p.work('agent') / 'agent.json')}
+        self.calls.clear()
+        with patch.object(m.shutil, 'which', return_value='/usr/bin/systemd-analyze'), \
+                patch.object(m, 'command', side_effect=m.Error('invalid unit')), self.assertRaises(m.Error):
+            self.app.install_service('agent', {'endpoint': 'https://new.example.com'}, {'agent.json': '{"token":"replacement"}'})
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+        self.assertIn(self.p.unit('agent').name, self.running)
+        self.assertEqual(self.calls, [])
+
+    def test_activation_failure_is_diagnosed_before_new_unit_is_removed(self):
+        self.app.owned(create=True)
+        self.fail_restart = self.p.unit('agent').name
+        with patch.object(self.app, 'activation_diagnostics') as diagnose:
+            diagnose.side_effect = lambda role: self.assertTrue(self.p.unit(role).exists())
+            with self.assertRaises(m.Error):
+                self.app.install_service('agent', {'endpoint': 'https://komari.example.com'}, {'agent.json': '{"token":"fixture"}'})
+        diagnose.assert_called_once_with('agent')
+        self.assertFalse(self.p.unit('agent').exists())
+        self.assertFalse(self.p.state('agent').exists())
+
+    def test_systemd_failure_exposes_action_and_sanitized_reason(self):
+        self.command.stop()
+        failure = subprocess.CompletedProcess([], 1, '', 'WorkingDirectory= path is not absolute\ntoken=private-value\n')
+        try:
+            with patch.object(m.subprocess, 'run', return_value=failure), self.assertRaises(m.Error) as error:
+                m.command(['systemd-analyze', 'verify', '/tmp/example.service'])
+            self.assertIn('systemd-analyze verify', str(error.exception))
+            self.assertIn('path is not absolute', str(error.exception))
+            self.assertNotIn('private-value', str(error.exception))
+        finally:
+            self.command.start()
+
     def install(self, role='server', files=None):
         self.app.owned(create=True)
         self.app.install_service(role, {'port': 25774} if role == 'server' else {'endpoint': 'https://komari.example.com'}, files)
