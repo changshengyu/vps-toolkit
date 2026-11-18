@@ -13,6 +13,7 @@ import platform
 import pwd
 import re
 import shutil
+import shlex
 import socket
 import sqlite3
 import subprocess
@@ -127,6 +128,57 @@ def endpoint(value):
         return 'https://' + host.lower()
     except ValueError:
         raise Error('请输入完整 HTTPS 域名，如 https://komari.example.com，不含路径、凭据或查询参数。') from None
+
+
+def official_command(value):
+    value = value.strip().removesuffix('&#x20;').strip()
+    try:
+        lexer = shlex.shlex(value, posix=True, punctuation_chars='|;&<>')
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        words = list(lexer)
+    except ValueError:
+        raise Error('命令引号不完整，请重新复制。') from None
+    url = 'https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/install.sh'
+    if words.count('|') != 1:
+        raise Error('请粘贴官方 wget/curl 下载后通过管道交给 bash 的完整命令。')
+    split = words.index('|')
+    download, invoke = words[:split], words[split+1:]
+    if download not in (['wget', '-qO-', url], ['curl', '-fsSL', url], ['curl', '-sL', url]):
+        raise Error('仅接受 komari-monitor/komari-agent 官方 main/install.sh 下载命令。')
+    if invoke[:1] == ['sudo']:
+        invoke = invoke[1:]
+    if invoke[:3] != ['bash', '-s', '--']:
+        raise Error('命令应使用 bash -s -- 传入官方参数。')
+    args = invoke[3:]
+    allowed = {'-e', '--endpoint', '-t', '--token', '--auto-discovery', '--interval',
+               '--info-report-interval', '--exclude-nics', '--include-nics',
+               '--exclude-mountpoint', '--include-mountpoint', '--prefer-ip-version',
+               '--install-version'}
+    switches = {'--disable-web-ssh', '--disable-auto-update', '--install-no-mirror'}
+    seen = {}
+    n = 0
+    while n < len(args):
+        flag = args[n]
+        if flag in switches:
+            n += 1
+            continue
+        if flag not in allowed or n + 1 >= len(args):
+            raise Error('命令含不支持的参数或额外 Shell 操作，未执行。')
+        val = args[n+1]
+        if any(c in val for c in '\r\n\0') or any(c.isspace() for c in val) or not re.fullmatch(r'[A-Za-z0-9_./:@,=+%-]+', val):
+            raise Error('参数格式无效，未执行。')
+        key = {'-e':'--endpoint', '-t':'--token'}.get(flag, flag)
+        if key in seen:
+            raise Error('命令参数重复，未执行。')
+        seen[key] = val
+        n += 2
+    endpoint(seen.get('--endpoint', ''))
+    auth = [key for key in ('--token', '--auto-discovery') if key in seen]
+    if len(auth) != 1:
+        raise Error('请提供节点 Token 或自动发现密钥其中一种。')
+    credential(seen[auth[0]])
+    return url, args, seen['--endpoint']
 
 
 def credential(value):
@@ -704,6 +756,26 @@ class Komari:
             raise Error('官方服务未确认已运行并开机自启；请用菜单 4 查看状态。')
 
     def agent_install(self):
+        if self.paths.unit('agent').exists():
+            raise Error('检测到旧工具箱 Agent。请先停止并卸载旧服务，再用面板已有节点的 Token 安装，避免重复注册。')
+        print('从 Komari 面板复制官方 wget/curl 一键安装命令；使用官方 /opt/komari 和 komari-agent.service。')
+        url, args, target = official_command(getpass.getpass('粘贴完整官方安装命令（隐藏输入，回车提交）: '))
+        print('面板：' + target + '；安装与更新由官方脚本完成。')
+        print('已有官方服务会由官方脚本更新；节点身份由其原目录保留。')
+        if not confirm('执行官方安装命令？'):
+            return
+        with tempfile.TemporaryDirectory(prefix='komari-official-') as tmp:
+            script = Path(tmp) / 'install.sh'
+            command(['curl', '-q', '-fsSL', '--proto', '=https', '--max-time', '60', '-o', script, url], timeout=65)
+            # Upstream logs include its token-bearing arguments. Do not relay them.
+            print('官方脚本正在安装（最多 5 分钟，含凭据的输出不展示）…', flush=True)
+            command(['env', 'SUDO_USER=root', 'bash', script, *args], timeout=300)
+        state = self.official_info()
+        if state.get('ActiveState') != 'active':
+            raise Error('官方服务未确认运行，请在菜单 4 查看状态。')
+        print('官方 Agent 正在运行；请到面板确认原节点持续上报。')
+
+    def legacy_agent_install(self):
         p = self.paths
         official = self.official_info()
         legacy = p.state('agent').exists()
@@ -848,7 +920,15 @@ def main():
     parser.add_argument('role', nargs='?', choices=list(VERSIONS), default='server')
     args = parser.parse_args()
     manager = Komari()
-    if args.action in ('access', 'status', 'logs'):
+    if args.action == 'agent-install':
+        # No toolkit config or installation directory for the official Agent.
+        with open('/run/lock/vps-toolkit-official-agent.lock', 'a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise Error('已有官方 Agent 安装任务正在运行。') from None
+            manager.agent_install()
+    elif args.action in ('access', 'status', 'logs'):
         if args.action != 'status' or manager.paths.base.exists():
             manager.owned()
         if args.action == 'logs':

@@ -176,7 +176,7 @@ class KomariTests(unittest.TestCase):
         secret = 'agent-fixture-token-1234'
         with patch('builtins.input', side_effect=['komari.example.com', '', '', '', 'y']), \
                 patch.object(m.getpass, 'getpass', return_value=secret), patch('sys.stdout', new_callable=io.StringIO) as output:
-            self.app.agent_install()
+            self.app.legacy_agent_install()
         cfg_path = self.p.work('agent') / 'agent.json'
         cfg = json.loads(cfg_path.read_text())
         self.assertEqual(cfg['endpoint'], 'https://komari.example.com')
@@ -191,12 +191,27 @@ class KomariTests(unittest.TestCase):
         self.assertNotIn(secret, output.getvalue())
         self.assertIn('--config', self.p.unit('agent').read_text())
         with patch('builtins.input', side_effect=['', '', '', '', 'y']), patch.object(m.getpass, 'getpass', return_value=''), patch('sys.stdout', new_callable=io.StringIO):
-            self.app.agent_install()
+            self.app.legacy_agent_install()
         self.assertEqual(json.loads(cfg_path.read_text())['token'], secret)
+
+    def test_pasted_official_command_is_parsed_without_shell_execution(self):
+        url = 'https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/install.sh'
+        text = 'wget -qO- ' + url + ' | sudo bash -s -- -e https://example.com --auto-discovery fixture-key'
+        parsed = m.official_command(text + '&#x20;')
+        self.assertEqual(parsed[0], url)
+        self.assertEqual(parsed[1][-1], 'fixture-key')
+        for bad in (text + '; touch /tmp/evil', text.replace(url, 'https://evil.example/install.sh'),
+                    text + ' --install-dir /tmp/custom', text + ' --config /tmp/custom'):
+            with self.assertRaises(m.Error):
+                m.official_command(bad)
+        with patch.object(m.getpass, 'getpass', return_value=text), patch('builtins.input', return_value='n'):
+            self.app.agent_install()
+        self.assertFalse(self.p.base.exists())
+        self.assertFalse(self.calls)
 
     def test_external_official_service_is_detected_without_reinstall(self):
         with patch.object(self.app, 'official_info', return_value={'LoadState':'loaded','ActiveState':'active'}), patch('builtins.input', side_effect=AssertionError):
-            self.app.agent_install()
+            self.app.legacy_agent_install()
             self.app.status()
         self.assertFalse(self.p.unit('agent').exists())
         self.assertFalse(self.p.base.exists())
@@ -221,9 +236,9 @@ class KomariTests(unittest.TestCase):
         self.install('agent', {'agent.json': '{"endpoint":"https://komari.example.com"}'})
         with patch('builtins.input', side_effect=['https://komari.example.com', '2', '10', '2', 'y']), \
                 patch.object(m.getpass, 'getpass', return_value='discovery-secret-123'), patch('sys.stdout', new_callable=io.StringIO):
-            self.app.agent_install()
+            self.app.legacy_agent_install()
         with patch('builtins.input', side_effect=['', '', '', '', 'y']), patch.object(m.getpass, 'getpass', return_value=''), patch('sys.stdout', new_callable=io.StringIO):
-            self.app.agent_install()
+            self.app.legacy_agent_install()
         cfg = json.loads((self.p.work('agent') / 'agent.json').read_text())
         self.assertFalse(cfg['disable_web_ssh'])
         cache = self.p.bin / 'auto-discovery.json'
