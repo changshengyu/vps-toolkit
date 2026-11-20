@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 1Panel 可视化管理面板：调用官方安装器并提供安全的状态入口。
-# 用法：bash scripts/1panel.sh [install|status|access|restart|uninstall]
+# 用法：bash scripts/1panel.sh [install|status|access|restart|uninstall|docker-proxy]
 
 set -euo pipefail
 
@@ -96,6 +96,11 @@ case "${1:-status}" in
     access) show_access ;;
     restart) restart_panel ;;
     uninstall) uninstall_panel ;;
+    docker-proxy)
+        require_root
+        require_command python3
+        exec python3 "$ROOT_DIR/lib/onepanel/docker_proxy.py"
+        ;;
     help|-h|--help)
         cat <<'HELP'
 用法：vt 1panel [操作]
@@ -104,7 +109,8 @@ case "${1:-status}" in
   access     查看面板地址、端口和账号信息
   restart    重启 1Panel 服务
   uninstall  确认后运行官方卸载器
+  docker-proxy  放行单个 Docker 容器访问宿主机代理（UFW）
 HELP
         ;;
-    *) die "未知操作：$1（可用：install、status、access、restart、uninstall）" ;;
+    *) die "未知操作：$1（可用：install、status、access、restart、uninstall、docker-proxy）" ;;
 esac
