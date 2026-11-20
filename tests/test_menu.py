@@ -124,10 +124,10 @@ exit "${MENU_ACTION_EXIT:-0}"
 
     def test_komari_menu_and_cli_keep_existing_main_numbers(self):
         routes = {(1,): ['setup-install'], (2,): ['agent-install'],
-                  (3,): ['access'], (4,): ['status']}
+                  (3,): ['server-update'], (4,): ['access'], (5,): ['status']}
         for role_index, role in ((1, 'server'), (2, 'agent'), (3, 'tunnel')):
             for action_index, action in enumerate(('start', 'stop', 'restart', 'logs', 'uninstall'), 1):
-                routes[(5, role_index, action_index)] = [action, role]
+                routes[(6, role_index, action_index)] = [action, role]
         for path, args in routes.items():
             with self.subTest(path=path):
                 self.calls.unlink(missing_ok=True)
@@ -139,7 +139,7 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.run_menu('', 'komari', 'status')
         self.assertEqual(self.records()[0]['args'], ['status'])
         self.calls.unlink()
-        self.run_menu('5\n2\nm\nq\n', 'komari')
+        self.run_menu('6\n2\nm\nq\n', 'komari')
         self.assertEqual(self.records(), [])
 
     def test_home_unwinds_nested_menus_without_running_commands(self):
@@ -173,7 +173,7 @@ exit "${MENU_ACTION_EXIT:-0}"
         self.assertGreaterEqual(result.stdout.count("当前位置：主菜单 / 使用帮助与快捷命令"), 2)
 
     def test_eof_or_quit_never_starts_an_action_and_invalid_choice_can_recover(self):
-        for input_path in ("", "7\n", "7\n5\nq\n", "2\n4\nq\n", "999\n7\n5\n0\n0\nq\n"):
+        for input_path in ("", "7\n", "7\n6\nq\n", "2\n4\nq\n", "999\n7\n6\n0\n0\nq\n"):
             with self.subTest(input=input_path):
                 self.run_menu(input_path)
                 self.assertEqual(self.records(), [])

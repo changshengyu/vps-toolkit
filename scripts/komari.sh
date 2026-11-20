@@ -9,6 +9,7 @@ case "${1:-help}" in
 用法：vt komari [操作] [server|agent|tunnel]
   setup-install            安装监控机并自动创建 Cloudflare HTTPS 域名入口
   server-install           在监控机安装 / 恢复服务端并初始化管理员
+  server-update            更新本工具管理的 Komari 服务端并保留数据
   tunnel-install           配置独立 Cloudflare Tunnel 域名入口
   agent-install            在每台被监控 VPS 安装 / 更新 Agent 配置
   access|status            查看访问方法 / 本机状态和资源
