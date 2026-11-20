@@ -70,11 +70,11 @@ REPO_RAW_SCRIPT="https://raw.githubusercontent.com/changshengyu/vps-toolkit/main
 
 # 终端支持时输出颜色
 if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
-    C_CYAN=$'\033[36m' C_DIM=$'\033[2m'
-    C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_RED=$'\033[31m' C_BOLD=$'\033[1m' C_RESET=$'\033[0m'
+    C_CYAN=$'\033[36m' C_BLUE=$'\033[34m' C_DIM=$'\033[2m'
+    C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_RED=$'\033[31m' C_MAGENTA=$'\033[35m' C_BOLD=$'\033[1m' C_RESET=$'\033[0m'
 else
-    C_CYAN="" C_DIM=""
-    C_GREEN="" C_YELLOW="" C_RED="" C_BOLD="" C_RESET=""
+    C_CYAN="" C_BLUE="" C_DIM=""
+    C_GREEN="" C_YELLOW="" C_RED="" C_MAGENTA="" C_BOLD="" C_RESET=""
 fi
 
 status_xui() {
@@ -111,6 +111,24 @@ status_result() {
     fi
 }
 
+status_1panel() {
+    if command -v 1pctl >/dev/null 2>&1 || [ -x /usr/local/bin/1pctl ] || [ -x /usr/bin/1pctl ]; then
+        printf '%s已安装%s' "$C_GREEN" "$C_RESET"
+    else
+        printf '%s未安装%s' "$C_YELLOW" "$C_RESET"
+    fi
+}
+
+status_sni() {
+    if systemctl is-active --quiet vps-toolkit-sni-site 2>/dev/null; then
+        printf '%s运行中%s' "$C_GREEN" "$C_RESET"
+    elif [ -f /etc/vps-toolkit-sni-site/state.json ]; then
+        printf '%s已配置%s' "$C_YELLOW" "$C_RESET"
+    else
+        printf '%s未配置%s' "$C_DIM" "$C_RESET"
+    fi
+}
+
 pause() {
     [ "$MENU_HOME" -eq 0 ] || return 0
     local answer
@@ -127,7 +145,7 @@ run() {
         0) ;;
         90) MENU_HOME=1 ;;
         91) exit 0 ;;
-        *) warn "操作未完成（退出码 $result）。" ;;
+        *) warn "操作未完成（退出码 ${result}）。" ;;
     esac
 }
 
@@ -196,70 +214,71 @@ status_shortcut() {
 }
 
 machine_summary() {
-    local os_name host_name
+    local os_name host_name memory_line uptime_line
     host_name="$(hostname 2>/dev/null || printf '未知')"
     os_name="$(uname -s 2>/dev/null || printf '未知')"
     if [ -r /etc/os-release ]; then
         os_name="$(awk -F= '$1 == "PRETTY_NAME" {sub(/^[^=]*=/, ""); gsub(/^"|"$/, ""); print; exit}' /etc/os-release)"
     fi
-    printf '  主机：%s  系统：%s  架构：%s\n' "$host_name" "$os_name" "$(uname -m)"
+    memory_line='不可用'
     if [ -r /proc/meminfo ]; then
-        awk '/^MemTotal:/ {total=$2} /^MemAvailable:/ {available=$2}
-            END {if (total) printf "  内存可用：%.0f / %.0f MiB", available/1024, total/1024}' /proc/meminfo
-        printf '  时区：%s\n' "$(date +%Z)"
+        memory_line="$(awk '/^MemTotal:/ {total=$2} /^MemAvailable:/ {available=$2}
+            END {if (total) printf "%.0f / %.0f MiB", available/1024, total/1024}' /proc/meminfo)"
     fi
+    uptime_line='不可用'
     if [ -r /proc/uptime ]; then
-        awk '{n=int($1); printf "  已运行：%d 天 %d 小时 %d 分钟\n", n/86400, (n%86400)/3600, (n%3600)/60}' /proc/uptime
+        uptime_line="$(awk '{n=int($1); printf "%d天 %d小时 %d分", n/86400, (n%86400)/3600, (n%3600)/60}' /proc/uptime)"
     fi
+    printf '  %s主机：%s %s\n' "$C_DIM" "$C_RESET" "$host_name"
+    printf '  %s系统：%s %s    %s架构：%s %s\n' "$C_DIM" "$C_RESET" "$os_name" "$C_DIM" "$C_RESET" "$(uname -m)"
+    printf '  %s内存：%s %s    %s运行时间：%s %s\n' "$C_DIM" "$C_RESET" "$memory_line" "$C_DIM" "$C_RESET" "$uptime_line"
 }
 
 opening_commands() {
-    printf '  在线打开（可复制）：\n'
-    printf 'bash <(curl -fsSL %s)\n' "$REPO_RAW_SCRIPT"
-    printf '  快捷命令：%s\n' "$(status_shortcut)"
-    printf '  常用命令（安装 vt 后）：vt komari  |  vt help\n'
+    printf '  %s在线入口%s  bash <(curl -fsSL %s)\n' "$C_DIM" "$C_RESET" "$REPO_RAW_SCRIPT"
+    printf '  %s快捷命令%s  %s\n' "$C_DIM" "$C_RESET" "$(status_shortcut)"
 }
 
 menu_header() {
     local location="${1:-主菜单}"
-    # Clear the visible screen only. Keep scrollback, noninteractive output and action logs.
     if [ -t 0 ] && [ -t 1 ] && [ "${TERM:-dumb}" != dumb ] && [ "${VPS_TOOLKIT_CLEAR:-1}" != 0 ]; then
         printf '\033[H\033[2J'
     fi
     if [ "$location" != 主菜单 ]; then
-        printf '\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$C_CYAN" "$C_RESET"
-        printf '%s  vps-toolkit%s  ·  当前位置：%s\n' "$C_BOLD" "$C_RESET" "$location"
-        printf '%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n' "$C_CYAN" "$C_RESET"
+        printf '\n%s┌──────────────────────────────────────────────────────────────┐%s\n' "$C_CYAN" "$C_RESET"
+        printf '%s│%s  %s%-56s%s  %s│%s\n' "$C_CYAN" "$C_RESET" "$C_BOLD" "vps-toolkit  /  当前位置：$location" "$C_RESET" "$C_CYAN" "$C_RESET"
+        printf '%s└──────────────────────────────────────────────────────────────┘%s\n' "$C_CYAN" "$C_RESET"
         return 0
     fi
-    cat <<HEAD
-
-${C_BOLD}╔══════════════════════════════════════════════╗
-║                 vps-toolkit                  ║
-╚══════════════════════════════════════════════╝${C_RESET}
-HEAD
+    printf '\n%s┌──────────────────────────────────────────────────────────────┐%s\n' "$C_CYAN" "$C_RESET"
+    printf '%s│%s  %svps-toolkit%s  %sVPS 控制台%s                              %s│%s\n' "$C_CYAN" "$C_RESET" "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET" "$C_CYAN" "$C_RESET"
+    printf '%s├──────────────────────────────────────────────────────────────┤%s\n' "$C_CYAN" "$C_RESET"
     machine_summary
-    printf '  3x-ui：%s  端口跳跃：%s  IPv6：%s  部署结果：%s\n' "$(status_xui)" "$(status_hop)" "$(status_ipv6)" "$(status_result)"
-    printf '  监控角色：%s\n' "$(status_monitor_role)"
-    printf '\n'
+    printf '%s├──────────────────────────────────────────────────────────────┤%s\n' "$C_CYAN" "$C_RESET"
+    printf '  %s服务状态%s\n' "$C_BOLD" "$C_RESET"
+    printf '  3x-ui       %-12s  Hysteria2    %-12s\n' "$(status_xui)" "$(status_hop)"
+    printf '  IPv6        %-12s  1Panel       %-12s\n' "$(status_ipv6)" "$(status_1panel)"
+    printf '  SNI 静态页  %-12s  部署结果     %-12s\n' "$(status_sni)" "$(status_result)"
+    printf '%s├──────────────────────────────────────────────────────────────┤%s\n' "$C_CYAN" "$C_RESET"
     opening_commands
-    printf '  %s提示：0 返回 · m 主菜单 · q 退出；运行结果按回车后才清屏。%s\n' "$C_DIM" "$C_RESET"
+    printf '%s└──────────────────────────────────────────────────────────────┘%s\n' "$C_CYAN" "$C_RESET"
+    printf '  %s输入编号选择功能，0 返回，m 主菜单，q 退出。%s\n' "$C_DIM" "$C_RESET"
 }
 
 menu_navigation() {
-    printf '  %s0.%s %s  |  m. 主菜单  |  q. 退出\n' "$C_GREEN" "$C_RESET" "${1:-返回上级}"
+    printf '\n  %s0%s 返回上级    %sm%s 主菜单    %sq%s 退出\n' "$C_GREEN" "$C_RESET" "$C_GREEN" "$C_RESET" "$C_GREEN" "$C_RESET"
 }
 
-# 打印编号选项：menu_items "标题" "选项1" "选项2" ...（0 由调用方决定是“返回”还是“退出”）
+# 打印编号选项，保持编号稳定，便于复制菜单路径。
 menu_items() {
     local title="$1" i=1 item
     shift
     printf '\n  %s%s%s\n' "$C_BOLD" "$title" "$C_RESET"
     for item in "$@"; do
         case "$title:$i" in
-            主菜单:1) printf '  %s── 代理节点 ──%s\n' "$C_DIM" "$C_RESET" ;;
-            主菜单:4) printf '\n  %s── 系统与工具 ──%s\n' "$C_DIM" "$C_RESET" ;;
-            主菜单:7) printf '\n  %s── 监控与站点 ──%s\n' "$C_DIM" "$C_RESET" ;;
+            主菜单:1) printf '\n  %s代理与节点%s\n' "$C_BLUE" "$C_RESET" ;;
+            主菜单:4) printf '\n  %s系统与工具%s\n' "$C_BLUE" "$C_RESET" ;;
+            主菜单:7) printf '\n  %s监控与站点%s\n' "$C_BLUE" "$C_RESET" ;;
         esac
         printf '  %s%d.%s %s\n' "$C_GREEN" "$i" "$C_RESET" "$item"
         i=$((i + 1))
