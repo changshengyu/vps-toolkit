@@ -109,7 +109,7 @@ case "${1:-status}" in
   access     查看面板地址、端口和账号信息
   restart    重启 1Panel 服务
   uninstall  确认后运行官方卸载器
-  docker-proxy  放行单个 Docker 容器访问宿主机代理（UFW）
+  docker-proxy  按容器或网段放行宿主机代理（UFW）
 HELP
         ;;
     *) die "未知操作：$1（可用：install、status、access、restart、uninstall、docker-proxy）" ;;

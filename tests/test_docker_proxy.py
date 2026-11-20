@@ -13,7 +13,7 @@ class DockerProxyTests(unittest.TestCase):
              patch.object(proxy, "docker", return_value="sub2api abc"), \
              patch.object(proxy, "networks", return_value={"1panel-network": {"IPAddress": endpoint[1], "Gateway": endpoint[2]}}), \
              patch.object(proxy, "bridge_endpoint", side_effect=[endpoint, after]), \
-             patch("builtins.input", side_effect=["", reply]), patch("builtins.print"):
+             patch("builtins.input", side_effect=["1", "", reply]), patch("builtins.print"):
             proxy.main()
 
     @patch.object(subprocess, "run")
@@ -38,3 +38,16 @@ class DockerProxyTests(unittest.TestCase):
             self.assertEqual(proxy.bridge_endpoint("abc", "net"), ("br0", "172.18.0.4", "172.18.0.1"))
             with self.assertRaises(ValueError):
                 proxy.bridge_endpoint("abc", "net")
+
+    @patch.object(subprocess, "run")
+    def test_network_scope_uses_matching_bridge_subnet(self, run):
+        ep = {"NetworkID": "id", "IPAddress": "172.18.0.4", "Gateway": "172.18.0.1", "IPPrefixLen": 16}
+        route = '[{"dev":"br0"}]'
+        addresses = '[{"addr_info":[{"local":"172.18.0.1","prefixlen":16}]}]'
+        with patch.object(proxy, "networks", return_value={"net": ep}), \
+             patch.object(proxy, "docker", side_effect=["app abc", "bridge", "bridge"]), \
+             patch.object(proxy, "output", side_effect=["Status: active", route, addresses, route, addresses]), \
+             patch("builtins.input", side_effect=["2", "", "y"]), patch("builtins.print"):
+            proxy.main()
+        run.assert_called_once_with(["ufw", "allow", "in", "on", "br0", "proto", "tcp", "from",
+                                     "172.18.0.0/16", "to", "172.18.0.1", "port", "10809"], check=True)

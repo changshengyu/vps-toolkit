@@ -1,4 +1,4 @@
-"""Allow a single Docker bridge endpoint to reach a TCP proxy on its host."""
+"""Allow a Docker container or bridge subnet to reach a TCP proxy on its host."""
 import ipaddress
 import json
 import os
@@ -33,7 +33,7 @@ def networks(container):
     return json.loads(raw)
 
 
-def bridge_endpoint(container, network):
+def bridge_endpoint(container, network, whole_network=False):
     endpoint = networks(container).get(network)
     if not endpoint:
         raise ValueError("容器的网络连接已变化，请重新选择")
@@ -48,6 +48,15 @@ def bridge_endpoint(container, network):
         addr["local"] == gateway for interface in addresses for addr in interface["addr_info"]
     ):
         raise ValueError("宿主机网卡与容器网关不匹配，请检查 Docker 网络")
+    if whole_network:
+        prefix = int(endpoint["IPPrefixLen"])
+        subnet = ipaddress.IPv4Network((source, prefix), strict=False)
+        if prefix == 0 or ipaddress.IPv4Address(gateway) not in subnet or not any(
+            addr["local"] == gateway and addr["prefixlen"] == prefix
+            for interface in addresses for addr in interface["addr_info"]
+        ):
+            raise ValueError("容器与网桥的 IPv4 网段不匹配")
+        source = str(subnet)
     return device, source, gateway
 
 
@@ -60,7 +69,9 @@ def main():
     attached = networks(container)
     network = choose("容器网络", sorted(name for name, ep in attached.items()
                                        if ep.get("IPAddress") and ep.get("Gateway")))
-    device, source, gateway = bridge_endpoint(container, network)
+    network_scope = "所选网络的整个 IPv4 子网（包括以后加入的容器）"
+    whole_network = choose("放行范围", ["仅此容器当前 IP", network_scope]) == network_scope
+    device, source, gateway = bridge_endpoint(container, network, whole_network)
     port = int(input("宿主机代理 TCP 端口 [10809]：").strip() or "10809")
     if not 1 <= port <= 65535:
         raise ValueError("端口须在 1 到 65535 之间")
@@ -69,11 +80,11 @@ def main():
     if input("应用规则？[y/N] ").strip().lower() not in ("y", "yes"):
         print("已取消")
         return
-    if (device, source, gateway) != bridge_endpoint(container, network):
+    if (device, source, gateway) != bridge_endpoint(container, network, whole_network):
         raise ValueError("容器地址已变化，请重新选择")
     subprocess.run(["ufw", *rule], check=True)
     print(f"在应用中填写 HTTP 代理：http://{gateway}:{port}")
-    print("UFW 按 IP 放行。删除容器或更换地址时请撤销旧规则：")
+    print("撤销此规则的命令：")
     print(" ".join(shlex.quote(arg) for arg in ["ufw", "delete", *rule]))
 
 
