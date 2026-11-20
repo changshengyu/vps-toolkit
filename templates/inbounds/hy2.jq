@@ -1,6 +1,6 @@
 # Hysteria2 入站：TLS 证书 + salamander 混淆 + 端口跳跃
 {
-  remark: "\($node)-hy2",
+  remark: "hy2",
   enable: true,
   expiryTime: 0,
   total: 0,

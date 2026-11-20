@@ -1,6 +1,6 @@
 # VLESS + Reality + XHTTP，外加 VLESS Encryption（ML-KEM-768）
 {
-  remark: "\($node)-reality-xhttp",
+  remark: "xhttp",
   enable: true,
   expiryTime: 0,
   total: 0,

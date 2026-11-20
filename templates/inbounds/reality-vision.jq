@@ -1,6 +1,6 @@
 # VLESS + Reality + Vision（TCP）
 {
-  remark: "\($node)-reality-vision",
+  remark: "reality",
   enable: true,
   expiryTime: 0,
   total: 0,

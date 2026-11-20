@@ -1,6 +1,6 @@
 # VLESS + WS + TLS，经 Cloudflare CDN
 {
-  remark: "\($node)-cdn-ws",
+  remark: "cdn-ws",
   enable: true,
   expiryTime: 0,
   total: 0,
