@@ -54,7 +54,7 @@ show_help() {
   result                     查看上次部署结果
   ipv6 status|enable|disable 查看 / 开启 / 关闭系统 IPv6
   monitor [操作]             旧监控兼容命令（uninstall 卸载旧服务）
-  komari [操作]              部署 Komari 服务端 / Agent / 域名入口
+  komari [操作]              部署 / 更新 Komari 服务端、Agent / 域名入口
   sni-site [操作]            ISP HTTPS 静态站点 / Reality SNI（help 查看操作）
   1panel [操作]              安装 / 管理 1Panel 可视化面板
   shortcut                   安装快捷命令 vt
@@ -386,7 +386,7 @@ help_menu() {
                 cat <<'GUIDE'
   新建代理节点：主菜单 1 → 1 预览 → 2 部署。
   更新现有节点：主菜单 1 → 3 更新配置。
-  Komari：监控机选 7 → 1，被监控机选 7 → 2；面板地址选 7 → 3。
+  Komari：监控机选 7 → 1，被监控机选 7 → 2；更新服务端选 7 → 3。
   所有菜单：0 返回上级，m 回主菜单，q 退出。
 GUIDE
                 ;;
@@ -547,17 +547,19 @@ komari_menu() {
         menu_items "Komari 监控" \
             "安装 / 恢复监控机（管理员 + 自动 HTTPS 域名）" \
             "安装 / 更新 Agent（粘贴官方一键命令）" \
+            "更新 Komari 服务端" \
             "查看访问地址与接入指南" \
             "查看本机状态与资源占用（官方 / 工具箱）" \
             "服务与日志（启动 / 停止 / 卸载）>"
         menu_navigation
-        read_choice 5
+        read_choice 6
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/komari.sh" setup-install ;;
             2) run bash "$ROOT_DIR/scripts/komari.sh" agent-install ;;
-            3) run bash "$ROOT_DIR/scripts/komari.sh" access ;;
-            4) run bash "$ROOT_DIR/scripts/komari.sh" status ;;
-            5) komari_services_menu; continue ;;
+            3) run bash "$ROOT_DIR/scripts/komari.sh" server-update ;;
+            4) run bash "$ROOT_DIR/scripts/komari.sh" access ;;
+            5) run bash "$ROOT_DIR/scripts/komari.sh" status ;;
+            6) komari_services_menu; continue ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac

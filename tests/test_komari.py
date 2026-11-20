@@ -135,6 +135,18 @@ class KomariTests(unittest.TestCase):
         self.app.owned(create=True)
         self.app.install_service(role, {'port': 25774} if role == 'server' else {'endpoint': 'https://komari.example.com'}, files)
 
+    def test_server_update_replaces_binary_and_preserves_database_state(self):
+        self.install()
+        m.save(self.p.state('server'), {'managed_by': m.MARKER, 'role': 'server', 'version': '1.6.1', 'port': 25774})
+        binary = self.p.binary('server')
+        with patch.object(self.app, 'download', side_effect=lambda role, **kwargs: m.atomic(binary, b'updated\n', 0o755)), \
+                patch.object(self.app, 'wait_server'), patch('builtins.input', return_value='y'), \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.app.server_update()
+        self.assertEqual(json.loads(self.p.state('server').read_text())['version'], m.VERSIONS['server'])
+        self.assertEqual(binary.read_bytes(), b'updated\n')
+        self.assertIn(m.VERSIONS['server'], output.getvalue())
+
     def test_server_is_loopback_unprivileged_autostart_and_idempotent(self):
         with patch('builtins.input', side_effect=['', 'y']), patch('sys.stdout', new_callable=io.StringIO):
             self.app.server_install()

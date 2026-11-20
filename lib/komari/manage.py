@@ -25,18 +25,21 @@ import urllib.parse
 import urllib.request
 
 MARKER = 'vps-toolkit-komari-v1'
-VERSIONS = {'server': '1.6.1', 'agent': '1.5.11', 'tunnel': '2026.11.0'}
+VERSIONS = {'server': '1.6.2', 'agent': '1.5.11', 'tunnel': '2026.11.0'}
+SUPPORTED_VERSIONS = {'server': {'1.6.1', '1.6.2'}, 'agent': {'1.5.11'}, 'tunnel': {'2026.11.0'}}
 HASHES = {
-    'server': {'amd64': '3deeb5607a229c506fa1e4fba06aae2083c9f20b7909cbf485c7b60c118c739e',
-               'arm64': 'a05fc3d27b3f93a81cf9129e3674e9d8541fafabed65742572c5a63b1a4a1e06'},
+    'server': {'amd64': 'dab1a00dd273fc741795e18a2fdf4fe1b3b057478110911084abbe6929829bb2',
+               'arm64': '9ea325433e2efc04eaa72122f7ac38cacdbc20fdde5193871f76f5a5ae176552'},
     'agent': {'amd64': '78c28d89e523816baea010c0ed0714f245f508ffdaca0540f5c9f230f7053c8c',
               'arm64': 'ff8e33dc12ef2b5738fa291a58498bd15dcbf8ef51966ab65fd67679a0abc87d'},
     'tunnel': {'amd64': '51f7c68b57ed7269164075d7e789efce5b59355982f06392deeb037d982a51fd',
                'arm64': 'abe54a006acf9faf2d19ee9d953cb0d0804e92f59c5382a162e57b84d086f56f'},
 }
-ASSET_IDS = {'server': {'amd64': 677083030, 'arm64': 677085117},
+ASSET_IDS = {'server': {'amd64': 770570420, 'arm64': 770569594},
              'agent': {'amd64': 569642242, 'arm64': 569642206},
              'tunnel': {'amd64': 739395030, 'arm64': 739395569}}
+LEGACY_HASHES = {'server': {'amd64': '3deeb5607a229c506fa1e4fba06aae2083c9f20b7909cbf485c7b60c118c739e',
+                              'arm64': 'a05fc3d27b3f93a81cf9129e3674e9d8541fafabed65742572c5a63b1a4a1e06'}}
 USERS = {'server': 'vps-komari', 'agent': 'root', 'tunnel': 'vps-komari-tunnel'}
 MEMORY = {'server': (256, 128, 50), 'agent': (64, 48, 15), 'tunnel': (96, 64, 20)}
 
@@ -354,7 +357,8 @@ class Komari:
         if not path.is_file():
             raise Error('尚未配置此角色：' + role)
         value = json.loads(path.read_text())
-        if value.get('managed_by') != MARKER or value.get('role') != role or value.get('version') != VERSIONS[role]:
+        if (value.get('managed_by') != MARKER or value.get('role') != role
+                or value.get('version') not in SUPPORTED_VERSIONS[role]):
             raise Error('配置不符合本工具管理的固定版本，未修改。')
         if role == 'server':
             port_number(value['port'])
@@ -391,18 +395,29 @@ class Komari:
             raise Error('专用服务账号不能使用 UID 0。')
         return account.pw_uid, account.pw_gid
 
-    def download(self, role):
+    def download(self, role, force=False, version=None):
         p = self.paths
-        url, expected = asset(role, architecture())
+        target_version = version or VERSIONS[role]
+        arch = architecture()
+        if version and version != VERSIONS[role]:
+            expected = HASHES[role][arch]
+            asset_id = ASSET_IDS[role][arch]
+            repo = {'server': 'komari-monitor/komari', 'agent': 'komari-monitor/komari-agent', 'tunnel': 'cloudflare/cloudflared'}[role]
+            url = f'https://github.com/{repo}/releases/download/{target_version}/' + ('komari-linux-' if role == 'server' else 'komari-agent-linux-' if role == 'agent' else 'cloudflared-linux-') + arch
+        else:
+            url, expected = asset(role, arch)
+            asset_id = ASSET_IDS[role][arch]
         if p.binary(role).exists():
             with p.binary(role).open('rb') as stream:
                 digest = hashlib.sha256()
                 for block in iter(lambda: stream.read(1024 * 1024), b''):
                     digest.update(block)
-            if digest.hexdigest() == expected:
+            digest_value = digest.hexdigest()
+            if digest_value == expected and not force:
                 return
-            raise Error('已有二进制与固定版本校验值不一致；未覆盖，请检查文件来源。')
-        print(f'下载官方 {role} {VERSIONS[role]} 并校验 SHA-256（每次最多 60 秒）…', flush=True)
+            if not force and not (role == 'server' and digest_value in LEGACY_HASHES['server'].values()):
+                raise Error('已有二进制与固定版本校验值不一致；未覆盖，请检查文件来源。')
+        print(f'下载官方 {role} {target_version} 并校验 SHA-256（每次最多 60 秒）…', flush=True)
         fd, temp = tempfile.mkstemp(prefix='.download-', dir=p.bin)
         os.close(fd)
         try:
@@ -412,11 +427,11 @@ class Komari:
             result = command(options + [url], timeout=125, check=False)
             if result.returncode:
                 repo = {'server': 'komari-monitor/komari', 'agent': 'komari-monitor/komari-agent', 'tunnel': 'cloudflare/cloudflared'}[role]
-                alternative = f'https://api.github.com/repos/{repo}/releases/assets/{ASSET_IDS[role][architecture()]}'
+                alternative = f'https://api.github.com/repos/{repo}/releases/assets/{asset_id}'
                 print('直链下载失败，改用同一官方 Release 的 API 下载地址（仍校验相同 SHA-256）…', flush=True)
                 result = command(options + ['--continue-at', '-', '--header', 'Accept: application/octet-stream', alternative], timeout=125, check=False)
                 if result.returncode:
-                    raise Error(f'下载官方 {role} {VERSIONS[role]} 失败（curl 退出码 {result.returncode}）；请检查到 GitHub 的网络后重试，未安装下载文件。')
+                    raise Error(f'下载官方 {role} {target_version} 失败（curl 退出码 {result.returncode}）；请检查到 GitHub 的网络后重试，未安装下载文件。')
             with open(temp, 'rb') as stream:
                 digest = hashlib.sha256()
                 for block in iter(lambda: stream.read(1024 * 1024), b''):
@@ -446,6 +461,7 @@ class Komari:
         p.units.mkdir(parents=True, exist_ok=True)
         unit_text = service_unit(p, role, config)
         self.verify_unit(role, unit_text)
+        state_version = self.state(role)['version'] if p.state(role).exists() else VERSIONS[role]
         changed = [p.unit(role), p.state(role)] + [work / name for name in (files or {})]
         previous = {}
         for path in changed:
@@ -458,7 +474,7 @@ class Komari:
             for name, value in (files or {}).items():
                 atomic(work / name, value)
                 os.chown(work / name, uid, gid)
-            save(p.state(role), {'managed_by': MARKER, 'role': role, 'version': VERSIONS[role], **config})
+            save(p.state(role), {'managed_by': MARKER, 'role': role, 'version': state_version, **config})
             atomic(p.unit(role), unit_text, 0o644)
             command(['systemctl', 'daemon-reload'])
             command(['systemctl', 'enable', p.unit(role).name])
@@ -565,6 +581,42 @@ class Komari:
                 return db.execute('SELECT COUNT(*) FROM users').fetchone()[0] > 0
         except sqlite3.Error:
             raise Error('无法只读确认管理员账号，请检查数据库和服务端日志；未发布域名入口。') from None
+
+    def server_update(self):
+        p = self.paths
+        self.owned()
+        cfg = self.state('server')
+        if not p.unit('server').is_file():
+            raise Error('Komari 服务端 unit 不存在，请先恢复服务端。')
+        current = cfg['version']
+        target = VERSIONS['server']
+        if current == target:
+            print(f'Komari 服务端已是 {target}，无需更新。')
+            return
+        print(f'准备将 Komari 服务端从 {current} 更新到 {target}；数据库、域名和配置会保留。')
+        if not confirm('下载并重启 Komari 服务端？'):
+            return
+        binary = p.binary('server')
+        if binary.is_symlink() or not binary.is_file():
+            raise Error('Komari 服务端二进制路径异常，未更新。')
+        with tempfile.TemporaryDirectory(prefix='komari-update-', dir=p.bin) as folder:
+            backup = Path(folder) / binary.name
+            shutil.copy2(binary, backup)
+            running = self.active('server')
+            try:
+                self.download('server', force=True, version=target)
+                if running:
+                    command(['systemctl', 'restart', p.unit('server').name])
+                    self.wait_server(cfg['port'], initialized=self.initialized())
+                save(p.state('server'), {'managed_by': MARKER, 'role': 'server',
+                                         'version': target, 'port': cfg['port']})
+            except Exception:
+                atomic(binary, backup.read_bytes(), backup.stat().st_mode & 0o777)
+                command(['systemctl', 'daemon-reload'], check=False)
+                if running:
+                    command(['systemctl', 'restart', p.unit('server').name], check=False)
+                raise
+        print(f'Komari 服务端已更新到 {target}。')
 
     def server_install(self):
         p = self.paths
@@ -916,7 +968,7 @@ class Komari:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['setup-install', 'server-install', 'agent-install', 'tunnel-install', 'access', 'status', 'logs', 'start', 'stop', 'restart', 'uninstall'])
+    parser.add_argument('action', choices=['setup-install', 'server-install', 'server-update', 'agent-install', 'tunnel-install', 'access', 'status', 'logs', 'start', 'stop', 'restart', 'uninstall'])
     parser.add_argument('role', nargs='?', choices=list(VERSIONS), default='server')
     args = parser.parse_args()
     manager = Komari()
@@ -937,7 +989,7 @@ def main():
             getattr(manager, args.action)()
     else:
         with manager.lock():
-            if args.action.endswith('-install'):
+            if args.action.endswith('-install') or args.action == 'server-update':
                 getattr(manager, args.action.replace('-', '_'))()
             else:
                 manager.service(args.role, args.action)
