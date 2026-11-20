@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$ROOT_DIR/lib/common.sh"
 case "${1:-help}" in
     help|-h|--help)
-        printf '%s\n' '用法：vt sni-site install|access|check|page|logs|start|stop|restart|uninstall'
+        printf '%s\n' '用法：vt sni-site install [--behind-1panel] [--port 18080] | access | check | page | logs | start | stop | restart | uninstall'
         exit 0
         ;;
 esac

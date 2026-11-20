@@ -1,4 +1,4 @@
-"""Dedicated Caddy HTTPS site, native systemd, TCP 443 only. Python stdlib."""
+"""Dedicated Caddy SNI site, native systemd, with optional 1Panel backend mode. Python stdlib."""
 import argparse
 import fcntl
 import grp
@@ -92,26 +92,28 @@ class Paths:
         return (self.config, self.data, self.web, self.binary_dir)
 
 
-def configuration(domain, paths, email=''):
+def configuration(domain, paths, email='', listen=':443', behind_1panel=False):
     domain = domain_name(domain)
-    issuer = {'module': 'acme', 'ca': 'https://acme-v02.api.letsencrypt.org/directory',
-              'challenges': {'http': {'disabled': True}}}
-    if email:
-        issuer['email'] = email
-    return {
-        'admin': {'listen': 'unix/' + str(paths.runtime / 'admin.sock')},
-        'apps': {
-            'http': {'servers': {'site': {
-                'listen': [':443'], 'protocols': ['h1', 'h2'],
-                'automatic_https': {'disable_redirects': True},
-                'tls_connection_policies': [{}],
-                'routes': [{'match': [{'host': [domain], 'path': ['/', '/index.html']}], 'handle': [
-                    {'handler': 'file_server', 'root': str(paths.web), 'index_names': ['index.html']}], 'terminal': True},
-                    {'handle': [{'handler': 'static_response', 'status_code': 404}], 'terminal': True}],
-            }}},
-            'tls': {'automation': {'policies': [{'subjects': [domain], 'issuers': [issuer], 'key_type': 'p256'}]}},
-        },
+    server = {
+        'listen': [listen],
+        'protocols': ['h1'] if behind_1panel else ['h1', 'h2'],
+        'routes': [{'match': [{'host': [domain], 'path': ['/', '/index.html']}], 'handle': [
+            {'handler': 'file_server', 'root': str(paths.web), 'index_names': ['index.html']}], 'terminal': True},
+            {'handle': [{'handler': 'static_response', 'status_code': 404}], 'terminal': True}],
     }
+    if not behind_1panel:
+        server['automatic_https'] = {'disable_redirects': True}
+        server['tls_connection_policies'] = [{}]
+    value = {'admin': {'listen': 'unix/' + str(paths.runtime / 'admin.sock')},
+             'apps': {'http': {'servers': {'site': server}}}}
+    if not behind_1panel:
+        issuer = {'module': 'acme', 'ca': 'https://acme-v02.api.letsencrypt.org/directory',
+                  'challenges': {'http': {'disabled': True}}}
+        if email:
+            issuer['email'] = email
+        value['apps']['tls'] = {'automation': {'policies': [
+            {'subjects': [domain], 'issuers': [issuer], 'key_type': 'p256'}]}}
+    return value
 
 
 def service_unit(paths):
@@ -208,11 +210,11 @@ def dns_preflight(domain):
     return resolved
 
 
-def port_free():
-    listeners = command(['ss', '-lntHp', 'sport = :443']).strip()
+def port_free(port=443):
+    listeners = command(['ss', '-lntHp', f'sport = :{port}']).strip()
     if listeners:
         print(listeners, file=sys.stderr)
-        raise Error('TCP 443 已占用；未停止或修改现有代理 / Web 服务。此模块需要独占本机 TCP 443；已有 HTTPS 网站可继续作为目标，无需重复部署。')
+        raise Error(f'TCP {port} 已占用；未停止或修改现有代理 / Web 服务。')
 
 
 def download_binary(path, machine=None):
@@ -234,6 +236,14 @@ def download_binary(path, machine=None):
                 raise Error('Caddy 发布包结构异常。')
             with tar.extractfile(members[0]) as source:
                 atomic(path, source.read(), 0o755)
+
+
+def probe_http(domain, port, address='127.0.0.1'):
+    with socket.create_connection((address, port), timeout=5) as stream:
+        stream.sendall(f'GET / HTTP/1.1\r\nHost: {domain}\r\nConnection: close\r\n\r\n'.encode())
+        response = stream.recv(4096).split(b'\r\n', 1)[0]
+        if not response.startswith(b'HTTP/1.1 200 '):
+            raise Error('本机静态页未返回 HTTP 200；请检查 Caddy 或 1Panel 反代配置。')
 
 
 def probe(domain, port=443, address='127.0.0.1', context=None):
@@ -315,7 +325,9 @@ class Site:
         if not p.binary.exists():
             download_binary(p.binary)
         if not p.document.exists():
-            json_save(p.document, configuration(value['domain'], p, value['email']))
+            json_save(p.document, configuration(value['domain'], p, value.get('email', ''),
+                                                  listen=('127.0.0.1:' + str(value.get('port', 443))) if value.get('behind_1panel') else ':443',
+                                                  behind_1panel=bool(value.get('behind_1panel'))))
         if not (p.web / 'index.html').exists():
             atomic(p.web / 'index.html', render_page(value['title']))
         with tempfile.TemporaryDirectory(prefix='vt-sni-validate-') as temp:
@@ -327,13 +339,17 @@ class Site:
                 raise Error('Caddy 配置验证失败，尚未启动：' + detail)
         self.write_unit()
 
-    def wait_ready(self, domain):
+    def wait_ready(self, domain, behind_1panel=False, port=443):
         last = ''
         deadline, notice = time.monotonic() + 150, 0
         while time.monotonic() < deadline:
             try:
-                expiry = probe(domain)
-                print('本机 HTTPS / TLS 1.3 / HTTP/2 检查通过；证书到期（GMT）：' + expiry)
+                if behind_1panel:
+                    probe_http(domain, port)
+                    print(f'本机 Caddy HTTP 静态页检查通过（127.0.0.1:{port}）。')
+                else:
+                    expiry = probe(domain)
+                    print('本机 HTTPS / TLS 1.3 / HTTP/2 检查通过；证书到期（GMT）：' + expiry)
                 return
             except (OSError, Error, ValueError) as exc:
                 last = str(exc)
@@ -343,7 +359,7 @@ class Site:
                 time.sleep(3)
         raise Error('服务配置已保留，但公开证书或首页未就绪：' + last + '。请检查灰云 A/AAAA、入站 TCP 443 和日志；Caddy 会继续尝试申请。')
 
-    def install(self):
+    def install(self, behind_1panel=False, port=18080):
         p = self.paths
         self.owned_paths()
         if p.state.exists():
@@ -351,7 +367,8 @@ class Site:
             print('已有站点，保留域名、首页和证书：' + current['domain'])
             self.provision_files(current)
             self.manage('start')
-            self.wait_ready(current['domain'])
+            current_port = int(current.get('port', 443 if not current.get('behind_1panel') else 18080))
+            self.wait_ready(current['domain'], bool(current.get('behind_1panel')), current_port)
             self.access()
             return
         if shutil.which('ss') is None or shutil.which('ip') is None:
@@ -369,39 +386,58 @@ class Site:
         else:
             raise Error('专用服务组已存在但没有托管记录，未接管。')
         domain = domain_name(input('HTTPS 站点域名（灰云直连，例如 myweb.example.com）: '))
-        email = input('证书联系邮箱（可留空）: ').strip()
-        if email and (not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email) or len(email) > 254):
-            raise Error('邮箱格式无效。')
+        email = ''
+        if not behind_1panel:
+            email = input('证书联系邮箱（可留空）: ').strip()
+            if email and (not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email) or len(email) > 254):
+                raise Error('邮箱格式无效。')
         title = input('静态页面名称 [云间手记]: ').strip() or '云间手记'
         page = render_page(title)
-        port_free()
-        print('检查域名 A/AAAA 是否指向本机…', flush=True)
-        dns_preflight(domain)
-        print('部署计划：独立 Caddy + systemd，自启、自动续签；仅 TCP 443，TLS 1.3 / HTTP/2。')
-        print('现有 ISP/SS、3x-ui 和路由配置保留。不会使用 TCP 80、UDP 443 或开放管理 API。')
-        print('请在云安全组及系统防火墙放行 TCP 443（签发和续期也需要）；本模块不更改防火墙策略。')
+        if behind_1panel:
+            if not 1024 <= int(port) <= 65535:
+                raise Error('1Panel 后端端口必须在 1024-65535 之间。')
+            port_free(int(port))
+            print(f'部署计划：Caddy 本机 HTTP 后端 127.0.0.1:{port}；由 1Panel 负责公网 HTTPS、证书和域名反代。')
+            print('请在 1Panel 中为此域名创建反向代理，目标填写：http://127.0.0.1:' + str(port))
+            print('Reality 的 target / SNI 仍填写此域名:443，由 1Panel 的 HTTPS 入口提供目标站点。')
+        else:
+            port_free()
+            print('检查域名 A/AAAA 是否指向本机…', flush=True)
+            dns_preflight(domain)
+            print('部署计划：独立 Caddy + systemd，自启、自动续签；仅 TCP 443，TLS 1.3 / HTTP/2。')
+            print('现有 ISP/SS、3x-ui 和路由配置保留。不会使用 TCP 80、UDP 443 或开放管理 API。')
+            print('请在云安全组及系统防火墙放行 TCP 443（签发和续期也需要）；本模块不更改防火墙策略。')
         if input('部署此 HTTPS 静态站点？[y/N]: ').strip().lower() not in ('y', 'yes'):
             print('已取消。')
             return
         for directory in p.directories():
             directory.mkdir(parents=True, exist_ok=True, mode=0o755)
             atomic(directory / '.vps-toolkit-owned', MARKER)
-        value = {'managed_by': MARKER, 'domain': domain, 'email': email, 'title': title, 'version': VERSION}
+        value = {'managed_by': MARKER, 'domain': domain, 'email': email, 'title': title, 'version': VERSION,
+                 'behind_1panel': bool(behind_1panel), 'port': int(port if behind_1panel else 443)}
         json_save(p.state, value)
         atomic(p.web / 'index.html', page)
         self.provision_files(value)
         self.manage('start')
-        self.wait_ready(domain)
+        self.wait_ready(domain, behind_1panel, int(port if behind_1panel else 443))
         self.access()
 
     def access(self):
         value = self.state()
         domain = value['domain']
-        print(f'网页：https://{domain}/')
-        print(f'其他 VPS 的 Reality SNI / serverNames：{domain}')
-        print(f'其他 VPS 的 Reality target / dest：{domain}:443')
-        print('客户端节点地址仍填入口 VPS 的地址。请在其他 VPS 的 3x-ui 中填写以上值。')
-        print('证书由本服务自动续签；TCP 443 和直连 A/AAAA 必须持续可用。')
+        if value.get('behind_1panel'):
+            port = int(value.get('port', 18080))
+            print(f'1Panel 反向代理目标：http://127.0.0.1:{port}')
+            print(f'网页：https://{domain}/（证书和公网 443 由 1Panel 管理）')
+            print(f'其他 VPS 的 Reality SNI / serverNames：{domain}')
+            print(f'其他 VPS 的 Reality target / dest：{domain}:443')
+            print('请在 1Panel 中将此域名反代到上面的本机目标，并确保 1Panel 支持 HTTP/2。')
+        else:
+            print(f'网页：https://{domain}/')
+            print(f'其他 VPS 的 Reality SNI / serverNames：{domain}')
+            print(f'其他 VPS 的 Reality target / dest：{domain}:443')
+            print('客户端节点地址仍填入口 VPS 的地址。请在其他 VPS 的 3x-ui 中填写以上值。')
+            print('证书由本服务自动续签；TCP 443 和直连 A/AAAA 必须持续可用。')
 
     def manage(self, action):
         self.state()
@@ -409,7 +445,8 @@ class Site:
         if action in ('start', 'restart'):
             active = subprocess.run(['systemctl', 'is-active', '--quiet', SERVICE]).returncode == 0
             if not active:
-                port_free()
+                value = self.state()
+                port_free(int(value.get('port', 443)))
             command(['systemctl', 'enable', SERVICE])
             command(['systemctl', action, SERVICE], timeout=40)
         elif action in ('stop', 'uninstall'):
@@ -424,9 +461,13 @@ class Site:
         status = subprocess.run(['systemctl', 'status', SERVICE, '--no-pager', '--lines=0'])
         if status.returncode:
             raise Error('本站点服务未运行，请在服务管理中启动。')
-        expiry = probe(value['domain'])
-        print('本机首页 HTTP 200、可信证书、TLS 1.3 和 HTTP/2 均通过；到期 GMT：' + expiry)
-        print('还需从其他 VPS 检查公网可达性，以及云安全组 TCP 443。')
+        if value.get('behind_1panel'):
+            probe_http(value['domain'], int(value.get('port', 18080)))
+            print('本机 Caddy HTTP 静态页检查通过；请另行检查 1Panel HTTPS 和公网 443。')
+        else:
+            expiry = probe(value['domain'])
+            print('本机首页 HTTP 200、可信证书、TLS 1.3 和 HTTP/2 均通过；到期 GMT：' + expiry)
+            print('还需从其他 VPS 检查公网可达性，以及云安全组 TCP 443。')
         self.access()
 
     def import_page(self):
@@ -449,6 +490,8 @@ class Site:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['install', 'access', 'check', 'page', 'logs', 'start', 'stop', 'restart', 'uninstall'])
+    parser.add_argument('--behind-1panel', action='store_true', help='让 Caddy 监听本机 HTTP 端口，由 1Panel 提供公网 HTTPS')
+    parser.add_argument('--port', type=int, default=18080, help='1Panel 后端端口，默认 18080')
     args = parser.parse_args()
     try:
         if os.geteuid() != 0:
@@ -469,7 +512,7 @@ def main():
                 except BlockingIOError:
                     raise Error('已有站点部署或管理任务在运行。') from None
                 if args.action in ('install', 'page'):
-                    site.install() if args.action == 'install' else site.import_page()
+                    site.install(args.behind_1panel, args.port) if args.action == 'install' else site.import_page()
                 else:
                     site.manage(args.action)
         return 0
