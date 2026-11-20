@@ -100,7 +100,7 @@ exit "${MENU_ACTION_EXIT:-0}"
                     self.assertEqual((self.records()[0]["port"], self.records()[0]["range"]), ("8443", "10000:20000"))
 
     def test_1panel_menu_and_cli_dispatch(self):
-        routes = {(1,): ['install'], (2,): ['status'], (3,): ['access'], (4,): ['restart'], (5,): ['uninstall']}
+        routes = {(1,): ['install'], (2,): ['status'], (3,): ['access'], (4,): ['restart'], (5,): ['uninstall'], (6,): ['docker-proxy']}
         for path, args in routes.items():
             self.calls.unlink(missing_ok=True)
             out = self.run_menu('9\n' + '\n'.join(map(str, path)) + '\n\nq\n')

@@ -84,6 +84,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 
 所有菜单统一支持：**0 返回上级、m 回主菜单、q 退出**（主菜单 0 退出）。操作结束的提示也可输入 m / q。Komari 监控机选 **7 → 1**，被监控机选 **7 → 2**。
 
+Docker 容器访问宿主机代理时，选 **9 → 6**，按提示选择容器、网桥网络和宿主机 TCP 代理端口（默认 10809）。放行范围可选「仅此容器当前 IP」或「整个 IPv4 子网」。选择整个子网后，同网络内已有和以后加入的容器都可以连接该网关的指定端口。应用仍需自行选择代理。工具显示代理地址与撤销命令。容器级规则在容器换 IP 后需要更新，网段级规则在网桥、网段或网关变化时需要更新。
+
 旧监控退役：在监控机和各旧节点分别执行 `vt monitor uninstall`。如需删除旧 Grafana 的专属 Tunnel 和 CNAME，先在监控机运行 `vt monitor tunnel-remove`。卸载保留数据和配置，不影响 Komari。
 
 选择 **6 → 1** 安装快捷命令，以后直接输入 `vt` 打开菜单，也可运行 `vt komari`、`vt help`、`vt deploy --config-only`。在线入口每次重新打开会下载 main；已打开的旧菜单不会自动切换代码，合并更新后请退出重开。原有 CLI 命令不变。
@@ -116,6 +118,7 @@ bash vps.sh shortcut            # 安装快捷命令 vt
 bash vps.sh ipv6 disable        # 关闭 IPv6（enable 开启，status 查看）
 bash vps.sh komari              # 打开独立 Komari 监控菜单
 bash vps.sh 1panel install        # 安装 1Panel 可视化面板
+bash vps.sh 1panel docker-proxy   # 选择容器、网络和代理端口，按容器或网络添加 UFW 入站规则
 bash vps.sh 1panel access         # 查看面板地址与账号信息
 bash vps.sh sni-site install --behind-1panel --port 18080
                                  # Caddy 在本机 18080 提供 Reality SNI 静态页，交给 1Panel 反代

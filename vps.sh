@@ -127,7 +127,7 @@ run() {
         0) ;;
         90) MENU_HOME=1 ;;
         91) exit 0 ;;
-        *) warn "操作未完成（退出码 $result）。" ;;
+        *) warn "操作未完成（退出码 ${result}）。" ;;
     esac
 }
 
@@ -521,15 +521,17 @@ onepanel_menu() {
             "查看 1Panel 状态" \
             "查看面板地址与账号信息" \
             "重启 1Panel" \
-            "卸载 1Panel（保留与否由官方卸载器提示）"
+            "卸载 1Panel（保留与否由官方卸载器提示）" \
+            "放行 Docker 容器访问宿主机代理（UFW）"
         menu_navigation
-        read_choice 5
+        read_choice 6
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/1panel.sh" install ;;
             2) run bash "$ROOT_DIR/scripts/1panel.sh" status ;;
             3) run bash "$ROOT_DIR/scripts/1panel.sh" access ;;
             4) run bash "$ROOT_DIR/scripts/1panel.sh" restart ;;
             5) run bash "$ROOT_DIR/scripts/1panel.sh" uninstall ;;
+            6) run bash "$ROOT_DIR/scripts/1panel.sh" docker-proxy ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac
