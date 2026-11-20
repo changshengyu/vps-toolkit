@@ -43,6 +43,14 @@ class SiteTests(unittest.TestCase):
         self.assertEqual(server['routes'][0]['match'][0]['path'], ['/', '/index.html'])
         self.assertEqual(server['routes'][1]['handle'][0]['status_code'], 404)
 
+    def test_1panel_backend_listens_on_loopback_without_acme(self):
+        value = s.configuration('site.example.com', self.paths, listen='127.0.0.1:18080', behind_1panel=True)
+        server = value['apps']['http']['servers']['site']
+        self.assertEqual(server['listen'], ['127.0.0.1:18080'])
+        self.assertEqual(server['protocols'], ['h1'])
+        self.assertNotIn('automatic_https', server)
+        self.assertNotIn('tls', value['apps'])
+
     def test_domain_injection_and_local_names_rejected(self):
         for value in ('https://site.example.com', 'site.example.com:443', 'example.com/x', 'localhost',
                       '127.0.0.1', '*.example.com', 'example.com\nadmin :2019', 'host.test'):

@@ -35,7 +35,7 @@ CODE
 exit "${MENU_ACTION_EXIT:-0}"
 '''
         for name in ("deploy.sh", "monitor.sh", "3x-ui.sh", "xui-routing.sh", "xui-geodata.sh",
-                     "hy2-port-hopping.sh", "ipv6.sh", "vps-tools.sh", "sni-site.sh", "komari.sh"):
+                     "hy2-port-hopping.sh", "ipv6.sh", "vps-tools.sh", "sni-site.sh", "komari.sh", "1panel.sh"):
             (self.repo / "scripts" / name).write_text(stub)
         denied = self.path / "bin"
         denied.mkdir()
@@ -98,6 +98,17 @@ exit "${MENU_ACTION_EXIT:-0}"
                 self.assertEqual([(r["script"], r["args"]) for r in self.records()], [(script, args)])
                 if script == "hy2-port-hopping.sh" and args == ["install"]:
                     self.assertEqual((self.records()[0]["port"], self.records()[0]["range"]), ("8443", "10000:20000"))
+
+    def test_1panel_menu_and_cli_dispatch(self):
+        routes = {(1,): ['install'], (2,): ['status'], (3,): ['access'], (4,): ['restart'], (5,): ['uninstall']}
+        for path, args in routes.items():
+            self.calls.unlink(missing_ok=True)
+            out = self.run_menu('9\n' + '\n'.join(map(str, path)) + '\n\nq\n')
+            self.assertEqual([(v['script'], v['args']) for v in self.records()], [('1panel.sh', args)])
+            self.assertIn('1Panel', out.stdout)
+        self.calls.unlink()
+        self.run_menu('', '1panel', 'status')
+        self.assertEqual(self.records()[0]['args'], ['status'])
 
     def test_sni_site_menu_dispatch_and_cli_preserve_existing_main_numbers(self):
         routes = {(1,): 'install', (2,): 'access', (3,): 'check', (4,): 'page', (5,): 'logs',

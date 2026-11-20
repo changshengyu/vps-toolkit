@@ -56,6 +56,7 @@ show_help() {
   monitor [操作]             旧监控兼容命令（uninstall 卸载旧服务）
   komari [操作]              部署 Komari 服务端 / Agent / 域名入口
   sni-site [操作]            ISP HTTPS 静态站点 / Reality SNI（help 查看操作）
+  1panel [操作]              安装 / 管理 1Panel 可视化面板
   shortcut                   安装快捷命令 vt
   tools [上游参数]           运行 VPS 多功能工具箱
   help                       显示帮助
@@ -450,9 +451,10 @@ sni_site_menu() {
             "检查服务 / 证书 / TLS 1.3 / HTTP2" \
             "替换首页 HTML（无需重启）" \
             "查看站点日志" \
-            "服务管理（启动 / 停止 / 卸载）>"
+            "服务管理（启动 / 停止 / 卸载）>" \
+            "部署 Caddy 静态 SNI 后端（供 1Panel 反代）"
         menu_navigation
-        read_choice 6
+        read_choice 7
         case "$CHOICE" in
             1) run bash "$ROOT_DIR/scripts/sni-site.sh" install ;;
             2) run bash "$ROOT_DIR/scripts/sni-site.sh" access ;;
@@ -460,6 +462,7 @@ sni_site_menu() {
             4) run bash "$ROOT_DIR/scripts/sni-site.sh" page ;;
             5) run bash "$ROOT_DIR/scripts/sni-site.sh" logs ;;
             6) sni_services_menu; continue ;;
+            7) run bash "$ROOT_DIR/scripts/sni-site.sh" install --behind-1panel --port 18080 ;;
             0) return 0 ;;
             *) warn "无效选项：$CHOICE"; continue ;;
         esac
@@ -508,6 +511,32 @@ komari_services_menu() {
     done
 }
 
+onepanel_menu() {
+    while [ "$MENU_HOME" -eq 0 ]; do
+        menu_header "主菜单 / 1Panel 可视化面板"
+        info "  1Panel 负责 Docker 项目、域名反代和证书的可视化管理。"
+        info "  Reality 或 Caddy 静态 SNI 站点若占用 443，需要先调整端口、IP 或入口。"
+        menu_items "1Panel 可视化面板" \
+            "安装 1Panel" \
+            "查看 1Panel 状态" \
+            "查看面板地址与账号信息" \
+            "重启 1Panel" \
+            "卸载 1Panel（保留与否由官方卸载器提示）"
+        menu_navigation
+        read_choice 5
+        case "$CHOICE" in
+            1) run bash "$ROOT_DIR/scripts/1panel.sh" install ;;
+            2) run bash "$ROOT_DIR/scripts/1panel.sh" status ;;
+            3) run bash "$ROOT_DIR/scripts/1panel.sh" access ;;
+            4) run bash "$ROOT_DIR/scripts/1panel.sh" restart ;;
+            5) run bash "$ROOT_DIR/scripts/1panel.sh" uninstall ;;
+            0) return 0 ;;
+            *) warn "无效选项：$CHOICE"; continue ;;
+        esac
+        pause
+    done
+}
+
 komari_menu() {
     while [ "$MENU_HOME" -eq 0 ]; do
         menu_header "主菜单 / Komari 监控"
@@ -546,9 +575,10 @@ main_menu() {
             "VPS 多功能工具箱" \
             "使用帮助 / 快捷命令 >" \
             "Komari 监控（服务端 / Agent / 域名）>" \
-            "ISP HTTPS 静态站点（Reality SNI）>"
+            "ISP HTTPS 静态站点（Reality SNI）>" \
+            "1Panel 可视化面板 >"
         menu_navigation 退出
-        read_choice 8
+        read_choice 9
         case "$CHOICE" in
             1) deploy_menu ;;
             2) xui_menu ;;
@@ -558,6 +588,7 @@ main_menu() {
             6) help_menu ;;
             7) komari_menu ;;
             8) sni_site_menu ;;
+            9) onepanel_menu ;;
             0) if [ "$MENU_HOME" -eq 1 ]; then continue; fi; exit 0 ;;
             *) warn "无效选项：$CHOICE" ;;
         esac
@@ -582,6 +613,15 @@ case "${1:-menu}" in
             info "旧监控已退出菜单。卸载旧服务：vt monitor uninstall；当前监控：vt komari。"
         else
             bash "$ROOT_DIR/scripts/monitor.sh" "$@"
+        fi
+        ;;
+    1panel)
+        shift
+        if [ "$#" -eq 0 ]; then
+            onepanel_menu
+            if [ "$MENU_HOME" -eq 1 ]; then main_menu; fi
+        else
+            bash "$ROOT_DIR/scripts/1panel.sh" "$@"
         fi
         ;;
     sni-site)
