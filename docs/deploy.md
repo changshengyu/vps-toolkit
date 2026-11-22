@@ -47,7 +47,8 @@ curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/main/vps.s
 | 导入入站 | 通过面板 API 导入；同端口已有入站时询问是否覆盖 |
 | 更新模板 | 备份当前 Xray 模板到 `/root/.vps-toolkit/backup/`，替换出站、路由规则和 geodata 自动更新，其他字段不变，然后重启 Xray 并检查状态 |
 | 端口跳跃 | 调用 `hy2-port-hopping.sh` |
-| 输出结果 | 面板地址、账号和分享链接，保存到 `/root/vps-deploy-result.txt`（权限 600） |
+| 订阅设置 | 自动启用 Clash / Mihomo 订阅、独立信息配置 / 提示节点，并写入订阅备注模板；订阅服务使用独立端口（默认 2096） |
+| 输出结果 | 面板地址、Clash / Mihomo 订阅地址、账号和分享链接，保存到 `/root/vps-deploy-result.txt`（权限 600） |
 
 脚本通过 `x-ui setting -getApiToken -tokenName vps-toolkit` 获取专用 API Token，每次运行会轮换这个 Token，不影响你在面板中创建的其他 Token。
 
@@ -100,7 +101,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/changshengyu/vps-toolkit/mai
 
 ### 部署后
 
-- 云厂商安全组需要手动放行：TCP 面板端口、443、30115、8443（HTTP 验证时还有 80，续期也要用）；UDP 443、20000-20100
+- 云厂商安全组需要手动放行：TCP 面板端口、`SUB_PORT`（默认 2096）、443、30115、8443（HTTP 验证时还有 80，续期也要用）；UDP 443、20000-20100
 - Cloudflare 中 CDN 域名开启小黄云，SSL/TLS 模式选"完全（严格）"；hy2 域名保持灰云
 
 ## 提供参数的方式
@@ -163,11 +164,20 @@ chmod 600 /root/.vps-toolkit/deploy.env
 | `SS_ISP_ADDR` / `SS_ISP_PORT` / `SS_ISP_PASS` | 启用 AI 分流时 | |
 | `SS_ISP_METHOD` | | `2022-blake3-aes-256-gcm` |
 | `PANEL_PORT` / `PANEL_USER` / `PANEL_PASS` / `PANEL_PATH` | | 随机生成 |
+| `SUB_PORT` | | `2096`，Clash / Mihomo 订阅服务端口 |
 | `HY2_PORT` / `HOP_RANGE` | | `443` / `20000-20100` |
 | `REALITY_PORT` / `XHTTP_PORT` / `CDN_PORT` | | `443` / `30115` / `8443` |
 | `CDN_WS_PATH` / `XHTTP_PATH` | | 随机路径 |
 | `CLIENT_EMAIL` | | 随机生成 |
 | `GEODATA_CRON` | | `0 20 * * *`（UTC 20:00，即北京时间 04:00）；`off` 关闭 geodata 自动更新 |
+
+部署完成后，脚本通过 `POST /panel/api/setting/all` 读取现有设置，只修改订阅相关字段，再通过 `POST /panel/api/setting/update` 保存。Clash / Mihomo 输出路径沿用已有 `subClashPath`，新面板没有设置时使用 `/mihomo`。备注模板为：
+
+```text
+{{COMMENT}}|{{INBOUND}}|📅到期:{{EXPIRE_DATE}}|📊已用:{{TRAFFIC_USED}}|📦总量:{{TRAFFIC_TOTAL}}
+```
+
+面板证书存在且可读时，订阅服务复用该证书并输出 `https` 地址。没有证书时仍会配置订阅服务，但结果文件会输出 `http` 地址，建议先为面板配置证书再向公网提供订阅。已有 3x-ui 面板的管理员账号不会被脚本猜测或覆盖。新安装面板使用部署参数中的 `PANEL_USER` 和 `PANEL_PASS`，并写入权限为 `600` 的状态和结果文件。
 
 ## 自动生成的密钥
 

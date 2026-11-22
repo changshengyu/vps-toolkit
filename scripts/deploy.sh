@@ -127,16 +127,18 @@ print_plan() {
 ==================== 部署计划 ====================
 1. 3x-ui：$panel_line
 2. 防火墙放行（先放行当前 SSH 端口）：
-   TCP $PANEL_PORT（面板） $REALITY_PORT（Reality） $XHTTP_PORT（XHTTP） $CDN_PORT（CDN）$port80
+   TCP $PANEL_PORT（面板） $SUB_PORT（Clash/Mihomo 订阅） $REALITY_PORT（Reality） $XHTTP_PORT（XHTTP） $CDN_PORT（CDN）$port80
    UDP $HY2_PORT（hy2） $HOP_RANGE（端口跳跃）
 3. 证书（/root/cert/<域名>/，续期后自动重启 x-ui）：
    - $HY2_DOMAIN：$hy2_cert，同时设为面板证书
    - $CDN_DOMAIN：DNS 验证（CF Token），只给 WS+TLS 入站使用
 4. 通过面板 API 导入 4 个入站，客户端 $CLIENT_EMAIL 共用订阅 ID ${SUB_ID:-（部署时生成）}
-5. 更新 Xray 模板：出站与路由（AI 分流：$([ "$ENABLE_AI_ROUTE" = "y" ] && printf '六六云 SS %s:%s' "$SS_ISP_ADDR" "$SS_ISP_PORT" || printf '未启用')）
+5. 配置 Clash / Mihomo 订阅：启用订阅服务和独立信息配置，写入备注模板
+   {{COMMENT}}|{{INBOUND}}|📅到期:{{EXPIRE_DATE}}|📊已用:{{TRAFFIC_USED}}|📦总量:{{TRAFFIC_TOTAL}}
+6. 更新 Xray 模板：出站与路由（AI 分流：$([ "$ENABLE_AI_ROUTE" = "y" ] && printf '六六云 SS %s:%s' "$SS_ISP_ADDR" "$SS_ISP_PORT" || printf '未启用')）
    geodata 自动更新：$([ "$GEODATA_CRON" = "off" ] || [ -z "$GEODATA_CRON" ] && printf '关闭' || printf 'cron "%s"（UTC）' "$GEODATA_CRON")
-6. 端口跳跃：UDP $HOP_RANGE -> $HY2_PORT
-7. 输出面板地址和分享链接到 $RESULT_FILE
+7. 端口跳跃：UDP $HOP_RANGE -> $HY2_PORT
+8. 输出面板地址、订阅地址和分享链接到 $RESULT_FILE
 提醒：云厂商安全组需要手动放行第 2 步中的端口。
 ==================================================
 PLAN
@@ -164,14 +166,16 @@ run_dry_run() {
 step() { info ""; info "==> $*"; }
 
 write_result() {
-    local scheme="https" path_part="" prev_umask
+    local scheme="https" path_part="" prev_umask clash_path
     [ -n "$PANEL_PATH" ] && path_part="/$PANEL_PATH"
     [ "$(panel_scheme)" = "http" ] && scheme="http"
+    clash_path="$(subscription_clash_path)"
     prev_umask="$(umask)"
     umask 077
     {
         printf '# vps-toolkit 一键部署结果（%s）\n\n' "$(date '+%F %T')"
         printf '面板地址：%s://%s:%s%s\n' "$scheme" "$HY2_DOMAIN" "$PANEL_PORT" "$path_part"
+        printf 'Clash / Mihomo 订阅：%s://%s:%s%s/%s\n' "$SUB_SCHEME" "$HY2_DOMAIN" "$SUB_PORT" "$clash_path" "$SUB_ID"
         if [ -n "$PANEL_USER" ]; then
             printf '面板用户：%s\n面板密码：%s\n' "$PANEL_USER" "$PANEL_PASS"
         else
@@ -179,8 +183,8 @@ write_result() {
         fi
         printf '\n客户端：%s，订阅 ID：%s\n\n分享链接：\n' "$CLIENT_EMAIL" "$SUB_ID"
         fetch_links
-        printf '\n云厂商安全组需放行：TCP %s %s %s %s%s；UDP %s %s\n' \
-            "$PANEL_PORT" "$REALITY_PORT" "$XHTTP_PORT" "$CDN_PORT" \
+        printf '\n云厂商安全组需放行：TCP %s %s %s %s %s%s；UDP %s %s\n' \
+            "$PANEL_PORT" "$SUB_PORT" "$REALITY_PORT" "$XHTTP_PORT" "$CDN_PORT" \
             "$([ "$HY2_CERT_MODE" = "http" ] && printf ' 80' || true)" "$HY2_PORT" "$HOP_RANGE"
     } >"$RESULT_FILE"
     chmod 600 "$RESULT_FILE"
@@ -222,6 +226,9 @@ run_config_only() {
     update_xray_template
     rm -rf "$PREVIEW_DIR"
     restart_xray
+
+    step "配置 Clash / Mihomo 订阅"
+    configure_subscription
 
     save_config_state "$STATE_FILE"
 

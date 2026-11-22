@@ -83,6 +83,7 @@ setup_firewall() {
         fw_allow tcp "$p" "SSH"
     done
     fw_allow tcp "$PANEL_PORT" "面板"
+    fw_allow tcp "$SUB_PORT" "Clash/Mihomo 订阅"
     fw_allow tcp "$REALITY_PORT" "Reality"
     fw_allow tcp "$XHTTP_PORT" "XHTTP"
     fw_allow tcp "$CDN_PORT" "CDN"
@@ -103,7 +104,7 @@ port_owner() {
 # 端口被 x-ui / xray 以外的程序占用时报错
 check_ports_free() {
     local errors=() item proto port owner
-    local items=("tcp $REALITY_PORT" "tcp $XHTTP_PORT" "tcp $CDN_PORT" "udp $HY2_PORT")
+    local items=("tcp $SUB_PORT" "tcp $REALITY_PORT" "tcp $XHTTP_PORT" "tcp $CDN_PORT" "udp $HY2_PORT")
     # 证书仍有效时不需要 80 端口
     if [ "$HY2_CERT_MODE" = "http" ] && ! cert_valid "$HY2_DOMAIN"; then items+=("tcp 80"); fi
     [ "$PANEL_INSTALLED" = "1" ] || items+=("tcp $PANEL_PORT")

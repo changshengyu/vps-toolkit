@@ -10,6 +10,8 @@ API_BASE=""
 API_TOKEN=""
 API_HEADER_FILE=""
 CURL_OPTS=()
+SUB_SCHEME="http"
+SUB_CLASH_PATH=""
 
 panel_installed() { [ -x "$XUI_BIN" ]; }
 
@@ -120,6 +122,64 @@ api() {
         die "面板返回错误（$method $path）：$(jq -r '.msg // empty' 2>/dev/null <<<"$body" || printf '%s' "${body:0:200}")"
     fi
     printf '%s' "$body"
+}
+
+# Configure the built-in subscription server without replacing unrelated settings.
+# The settings endpoint accepts the complete object returned by /all, so merge only
+# the values owned by this deployment and keep all other panel settings intact.
+configure_subscription() {
+    local current settings file cert key clash_path
+
+    current="$(api POST /panel/api/setting/all)"
+    settings="$(jq -c --argjson port "$SUB_PORT" '
+        .obj | if type == "string" then fromjson else . end
+        | .subEnable = true
+        | .subClashEnable = true
+        | .subPort = $port
+        | .subInfoNodeEnable = true
+        | .remarkTemplate = "{{COMMENT}}|{{INBOUND}}|📅到期:{{EXPIRE_DATE}}|📊已用:{{TRAFFIC_USED}}|📦总量:{{TRAFFIC_TOTAL}}"
+        | if (.subClashPath // "") == "" then .subClashPath = "/mihomo/" else . end
+    ' <<<"$current")"
+    [ -n "$settings" ] && [ "$settings" != null ] || die "读取 3x-ui 订阅设置失败。"
+
+    clash_path="$(jq -r '.subClashPath // "/mihomo/"' <<<"$settings")"
+    [[ "$clash_path" = /* ]] || clash_path="/$clash_path"
+    [[ "$clash_path" = */ ]] || clash_path="$clash_path/"
+    SUB_CLASH_PATH="${clash_path%/}"
+
+    # Reuse the panel certificate for the separate subscription listener when the
+    # panel already serves HTTPS. This keeps credentials and subscription content
+    # encrypted without requiring a second certificate request.
+    cert="$($XUI_BIN setting -getCert true 2>/dev/null | awk -F': ' '/^cert:/ {print $2}' | tr -d '[:space:]' || true)"
+    key="$($XUI_BIN setting -getCert true 2>/dev/null | awk -F': ' '/^key:/ {print $2}' | tr -d '[:space:]' || true)"
+    if [ -n "$cert" ] && [ -r "$cert" ] && [ -n "$key" ] && [ -r "$key" ]; then
+        settings="$(jq -c --arg cert "$cert" --arg key "$key" '.subCertFile = $cert | .subKeyFile = $key' <<<"$settings")"
+        SUB_SCHEME="https"
+    else
+        settings="$(jq -c 'del(.subCertFile, .subKeyFile)' <<<"$settings")"
+    fi
+
+    file="$(mktemp)"
+    chmod 600 "$file"
+    printf '%s' "$settings" >"$file"
+    api POST /panel/api/setting/update -H 'Content-Type: application/json' --data-binary "@$file" >/dev/null
+    rm -f "$file"
+    # Settings are persisted immediately, but the subscription listener reads
+    # them when its process starts. Restart and wait for the panel before the
+    # result file probes links or prints the final URL.
+    api POST /panel/api/setting/restartPanel >/dev/null
+    sleep 4
+    wait_panel_ready
+    info "已启用 Clash / Mihomo 订阅（端口 $SUB_PORT，路径 $SUB_CLASH_PATH）。"
+    info "已启用独立信息配置 / 提示节点，并设置订阅备注模板。"
+}
+
+subscription_clash_path() {
+    if [ -n "$SUB_CLASH_PATH" ]; then
+        printf '%s' "$SUB_CLASH_PATH"
+        return 0
+    fi
+    printf '/mihomo'
 }
 
 wait_panel_ready() {
