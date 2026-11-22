@@ -23,6 +23,7 @@ PARAM_SPECS=(
     "PANEL_USER|panel-user|面板用户名|@rand_str10|opt"
     "PANEL_PASS|panel-pass|面板密码|@rand_str16|opt"
     "PANEL_PATH|panel-path|面板访问路径|@rand_str18|opt"
+    "SUB_PORT|sub-port|Clash / Mihomo 订阅服务端口|2096|opt"
     "HY2_PORT|hy2-port|hy2 端口（UDP）|443|opt"
     "HOP_RANGE|hop-range|hy2 端口跳跃范围|20000-20100|opt"
     "REALITY_PORT|reality-port|Reality+Vision 端口（TCP）|443|opt"
@@ -35,7 +36,7 @@ PARAM_SPECS=(
 )
 
 # --config-only 模式只用到这些参数（出站、路由和 geodata）
-CONFIG_ONLY_PARAMS=" ENABLE_AI_ROUTE SS_ISP_ADDR SS_ISP_PORT SS_ISP_PASS SS_ISP_METHOD GEODATA_CRON "
+CONFIG_ONLY_PARAMS=" ENABLE_AI_ROUTE SS_ISP_ADDR SS_ISP_PORT SS_ISP_PASS SS_ISP_METHOD GEODATA_CRON SUB_PORT "
 
 # 摘要中只显示开头几位的参数
 SECRET_PARAMS=" CF_TOKEN SS_ISP_PASS PANEL_PASS "
@@ -312,6 +313,7 @@ validate_config_params() {
     [ "${ENABLE_AI_ROUTE:-y}" = "y" ] && ss_problem="$(check_param SS_ISP_PASS "$SS_ISP_PASS")"
     [ -z "$ss_problem" ] || errors+=("SS_ISP_PASS：$ss_problem")
     case "$ENABLE_AI_ROUTE" in y | n) ;; *) errors+=("ENABLE_AI_ROUTE 只能是 y 或 n：$ENABLE_AI_ROUTE") ;; esac
+    is_port "$SUB_PORT" || errors+=("SUB_PORT 不是有效端口：$SUB_PORT")
     if [ "$ENABLE_AI_ROUTE" = "y" ]; then
         is_port "$SS_ISP_PORT" || errors+=("SS_ISP_PORT 不是有效端口：$SS_ISP_PORT")
         [[ "$SS_ISP_ADDR" =~ ^[A-Za-z0-9.:-]+$ ]] || errors+=("SS_ISP_ADDR 格式无效：$SS_ISP_ADDR")
@@ -348,7 +350,7 @@ validate_params() {
     case "$HY2_CERT_MODE" in http | dns) ;; *) errors+=("HY2_CERT_MODE 只能是 http 或 dns：$HY2_CERT_MODE") ;; esac
     case "$ENABLE_AI_ROUTE" in y | n) ;; *) errors+=("ENABLE_AI_ROUTE 只能是 y 或 n：$ENABLE_AI_ROUTE") ;; esac
 
-    for p in PANEL_PORT HY2_PORT REALITY_PORT XHTTP_PORT CDN_PORT; do
+    for p in PANEL_PORT SUB_PORT HY2_PORT REALITY_PORT XHTTP_PORT CDN_PORT; do
         is_port "${!p}" || errors+=("$p 不是有效端口：${!p}")
     done
 
@@ -358,9 +360,9 @@ validate_params() {
     fi
 
     # TCP 端口不能重复（hy2 用 UDP，可以和 Reality 共用 443）
-    local tcp_ports="$PANEL_PORT $REALITY_PORT $XHTTP_PORT $CDN_PORT"
+    local tcp_ports="$PANEL_PORT $SUB_PORT $REALITY_PORT $XHTTP_PORT $CDN_PORT"
     if [ "$(tr ' ' '\n' <<<"$tcp_ports" | sort | uniq -d)" != "" ]; then
-        errors+=("TCP 端口有重复：面板 $PANEL_PORT / Reality $REALITY_PORT / XHTTP $XHTTP_PORT / CDN $CDN_PORT")
+        errors+=("TCP 端口有重复：面板 $PANEL_PORT / 订阅 $SUB_PORT / Reality $REALITY_PORT / XHTTP $XHTTP_PORT / CDN $CDN_PORT")
     fi
     if [ "$HY2_CERT_MODE" = "http" ] && [ "$PANEL_PORT" = "80" ]; then
         errors+=("http 验证需要占用 TCP 80，面板端口不能是 80")
