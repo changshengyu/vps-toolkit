@@ -281,6 +281,9 @@ run_deploy() {
     update_xray_template
     restart_xray
 
+    step "配置 Clash / Mihomo 订阅"
+    configure_subscription
+
     if [ "$SKIP_HOP" = "1" ]; then
         step "端口跳跃：已按 --skip-hop 跳过"
     else
