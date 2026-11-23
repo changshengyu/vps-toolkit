@@ -129,7 +129,7 @@ require_root() { :; }; panel_installed() { return 0; }; detect_existing_panel() 
 HY2_DOMAIN=old.example.test
 panel_cert_domain() { printf old.example.test; }
 init_api() { :; }; wait_panel_ready() { :; }; backup_xray_template() { printf backup; }
-update_xray_template() { :; }; restart_xray() { :; }
+update_xray_template() { :; }; restart_xray() { :; }; configure_subscription() { :; }
 main --config-only --edit
 '''
         self.shell(code, 'SS_ISP_PORT\n9443\n0\ny\n')
