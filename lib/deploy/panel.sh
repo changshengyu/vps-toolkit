@@ -170,6 +170,11 @@ configure_subscription() {
     api POST /panel/api/setting/restartPanel >/dev/null
     sleep 4
     wait_panel_ready
+    current="$(api POST /panel/api/setting/all)"
+    jq -e --arg template '{{COMMENT}}|{{INBOUND}}|📅到期:{{EXPIRE_DATE}}|📊已用:{{TRAFFIC_USED}}|📦总量:{{TRAFFIC_TOTAL}}' '
+        (.obj | if type == "string" then fromjson else . end)
+        | (.subEnable == true and .subClashEnable == true and .subInfoNodeEnable == true and .remarkTemplate == $template)
+    ' <<<"$current" >/dev/null || die "3x-ui 订阅设置回读校验失败，请检查面板版本和 API 日志。"
     info "已启用 Clash / Mihomo 订阅（端口 $SUB_PORT，路径 $SUB_CLASH_PATH）。"
     info "已启用独立信息配置 / 提示节点，并设置订阅备注模板。"
 }

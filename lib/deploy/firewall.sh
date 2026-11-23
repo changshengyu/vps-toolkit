@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# 一键部署：检查端口占用，在已启用的系统防火墙上放行端口
-# 只在已启用的防火墙上添加规则，不会主动启用防火墙。
+# 一键部署：检查端口占用，在系统防火墙上放行端口。
+# 没有启用防火墙时，优先启用已安装的 UFW / firewalld；必要时安装可用的防火墙包。
 
 FIREWALL=""
 
@@ -15,6 +15,65 @@ detect_firewall() {
     else
         FIREWALL="none"
     fi
+}
+
+prepare_firewall() {
+    local ssh_ports
+
+    detect_firewall
+    [ "$FIREWALL" != "none" ] && return 0
+
+    if command -v ufw >/dev/null 2>&1; then
+        FIREWALL="ufw"
+    elif command -v firewall-cmd >/dev/null 2>&1; then
+        FIREWALL="firewalld"
+    elif command -v apt-get >/dev/null 2>&1; then
+        info "未检测到防火墙，正在安装 UFW。"
+        ensure_packages ufw
+        FIREWALL="ufw"
+    elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+        info "未检测到防火墙，正在安装 firewalld。"
+        if command -v dnf >/dev/null 2>&1; then
+            dnf install -y firewalld >/dev/null
+        else
+            yum install -y firewalld >/dev/null
+        fi
+        command -v firewall-cmd >/dev/null 2>&1 || {
+            warn "安装 firewalld 后仍找不到 firewall-cmd，跳过系统防火墙。"
+            return 1
+        }
+        FIREWALL="firewalld"
+    else
+        warn "未找到可自动配置的 UFW 或 firewalld，跳过系统防火墙。"
+        return 1
+    fi
+
+    ssh_ports="$(detect_ssh_ports)"
+    if [ -z "$ssh_ports" ]; then
+        warn "无法确认当前 SSH 端口，已跳过启用防火墙以避免锁死 SSH。"
+        FIREWALL="none"
+        return 1
+    fi
+
+    case "$FIREWALL" in
+        ufw)
+            for port in $ssh_ports; do
+                ufw allow "$port/tcp" comment "vps-toolkit SSH" >/dev/null
+            done
+            ufw default deny incoming >/dev/null
+            ufw default allow outgoing >/dev/null
+            ufw --force enable >/dev/null
+            ;;
+        firewalld)
+            systemctl enable --now firewalld >/dev/null 2>&1 || {
+                warn "无法启动 firewalld，跳过系统防火墙。"
+                FIREWALL="none"
+                return 1
+            }
+            ;;
+    esac
+    info "已准备防火墙：$FIREWALL"
+    return 0
 }
 
 # 当前 SSH 端口：优先取本次连接的端口，其次取 sshd 配置
@@ -71,9 +130,8 @@ fw_finish() {
 setup_firewall() {
     local p
 
-    detect_firewall
-    if [ "$FIREWALL" = "none" ]; then
-        info "未检测到已启用的系统防火墙，跳过。"
+    if ! prepare_firewall || [ "$FIREWALL" = "none" ]; then
+        info "系统防火墙未配置，云厂商安全组仍需放行部署计划中的端口。"
         return 0
     fi
 
