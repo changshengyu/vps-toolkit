@@ -61,11 +61,30 @@ ensure_packages() {
     [ "$(id -u)" -eq 0 ] || die "缺少命令：${missing[*]}，请先安装，或用 root 运行以便自动安装。"
     info "正在安装：${missing[*]}"
     if command -v apt-get >/dev/null 2>&1; then
-        apt-get update -y >/dev/null && apt-get install -y "${missing[@]}" >/dev/null
+        info "正在更新 apt 软件包索引（网络超时 30 秒，最多重试 2 次）..."
+        if ! DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none \
+            apt-get -o DPkg::Lock::Timeout=60 \
+                -o Acquire::Retries=2 \
+                -o Acquire::http::Timeout=30 \
+                -o Acquire::https::Timeout=30 \
+                update; then
+            die "apt 软件包索引更新失败。请先手动运行：apt-get update"
+        fi
+        info "正在安装软件包：${missing[*]}..."
+        if ! DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none \
+            apt-get -o DPkg::Lock::Timeout=60 \
+                -o Acquire::Retries=2 \
+                -o Acquire::http::Timeout=30 \
+                -o Acquire::https::Timeout=30 \
+                install -y --no-install-recommends "${missing[@]}"; then
+            die "apt 安装失败：${missing[*]}。请检查软件源、网络和 /var/lib/dpkg/lock* 是否被其他 apt 进程占用。"
+        fi
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y "${missing[@]}" >/dev/null
+        info "正在安装软件包：${missing[*]}..."
+        dnf install -y --setopt=timeout=30 --setopt=retries=2 "${missing[@]}"
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y "${missing[@]}" >/dev/null
+        info "正在安装软件包：${missing[*]}..."
+        yum install -y --setopt=timeout=30 --setopt=retries=2 "${missing[@]}"
     else
         die "无法自动安装 ${missing[*]}，请手动安装后重试。"
     fi
